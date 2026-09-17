@@ -1,7 +1,7 @@
 import axios from "axios";
 
 // Use local backend with updated CORS
-const API_BASE = "https://sap-app-maoe.onrender.com/api/auth";
+const API_BASE = "https://sap-app.cfapps.eu10-004.hana.ondemand.com/api/auth";
 
 // Create axios instance with CORS configuration
 const apiClient = axios.create({
@@ -24,15 +24,11 @@ export const loginUser = async (username, password, environment) => {
     const result = response.data?.["ns0:Z_WM_HANDHELD_LOGINResponse"];
 
     if (result?.E_TYPE === "S") {
-      const token = btoa(`${username}:${password}`);
-      // Persist credentials for later API calls
-      localStorage.setItem('token', token);
-      localStorage.setItem('user', JSON.stringify({ username, environment }));
       return {
         success: true,
         username,
         environment,
-        token
+        token: btoa(`${username}:${password}`)  // Changed from Buffer to btoa
       };
     } else {
       throw new Error(result?.E_MESSAGE || "Authentication failed");
@@ -52,20 +48,28 @@ export const loginUser = async (username, password, environment) => {
                         "Authentication failed";
     throw new Error(errorMessage);
   }
-};
+}
 
-// Helper to decode user credentials from token for SAP auth
 export const getUserCredentials = () => {
   const token = localStorage.getItem('token');
-  if (!token) return null;
+  const username = localStorage.getItem('username');
+  const environment = localStorage.getItem('environment');
+  
+  if (!token || !username || !environment) {
+    return null;
+  }
+  
+  // Decode the token to get password
   try {
     const decoded = atob(token);
-    const [username, password] = decoded.split(':');
-    const userStr = localStorage.getItem('user');
-    const user = userStr ? JSON.parse(userStr) : {};
-    return { username, password, environment: user.environment };
-  } catch {
+    const [_, password] = decoded.split(':');
+    return {
+      username,
+      password,
+      environment
+    };
+  } catch (error) {
+    console.error('Failed to decode token:', error);
     return null;
   }
 };
-

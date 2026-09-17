@@ -689,3 +689,15 @@ select {
   border: 1px solid #f5c6cb;
   border-radius: 4px;
 }
+
+/* Zebra scan input optimization */
+input[type="text"] {
+  -webkit-user-select: none;
+  user-select: none;
+  caret-color: transparent; /* scanner-friendly */
+}
+
+/* Restore caret only on manual focus */
+input[type="text"]:focus {
+  caret-color: auto;
+}

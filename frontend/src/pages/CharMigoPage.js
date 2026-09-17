@@ -4,7 +4,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { getUserCredentials } from '../api';
 
-function MigoPage({ user, onLogout }) {
+function CharMigoPage({ user, onLogout }) {
   const location = useLocation();
   const navigate = useNavigate();
   const batchData = location.state?.batchData;
@@ -28,7 +28,7 @@ function MigoPage({ user, onLogout }) {
 
   useEffect(() => {
     if (!batchData) {
-      navigate('/bsp');
+      navigate('/char');
       return;
     }
 
@@ -167,7 +167,7 @@ function MigoPage({ user, onLogout }) {
   };
 
   const handleFetchAgain = () => {
-    navigate('/bsp', { replace: true, state: null });
+    navigate('/char', { replace: true, state: null });
   };
 
   const handleTransfer = async (isTestRun) => {
@@ -222,7 +222,7 @@ function MigoPage({ user, onLogout }) {
   };
 
   const handleBack = () => {
-    navigate('/bsp', {
+    navigate('/char', {
       state: { prefillBatches: batchData }
     });
   };
@@ -467,4 +467,4 @@ function MigoPage({ user, onLogout }) {
   );
 }
 
-export default MigoPage;
+export default CharMigoPage;

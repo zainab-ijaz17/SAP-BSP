@@ -1,13 +1,20 @@
 import React, { useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 
-function SplashScreen({ onFinish }) {
+function SplashScreen({ user }) {
+  const navigate = useNavigate();
+
   useEffect(() => {
     const t = setTimeout(() => {
-      onFinish();
-    }, 2000);
+      if (user) {
+        navigate("/main", { replace: true });
+      } else {
+        navigate("/login", { replace: true });
+      }
+    }, 5000);
 
     return () => clearTimeout(t);
-  }, [onFinish]);
+  }, [navigate, user]);
 
   return (
     <div
@@ -16,7 +23,7 @@ function SplashScreen({ onFinish }) {
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        background: "linear-gradient(180deg, #679be9ff 0%, #559cc5ff 100%)",
+        background: "linear-gradient(180deg, #679be9ff 0%, #5b80b7ff 100%)",
         padding: "24px"
       }}
     >

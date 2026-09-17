@@ -4,6 +4,6 @@ export const servers = [
 ];
 
 export const apiEndpoints = {
-  dev: 'https://sap-app.cfapps.eu10-004.hana.ondemand.com',
-  prd: 'http://192.168.60.111:5000'
+  dev: 'https://sap-app1.cfapps.eu10-004.hana.ondemand.com',
+  prd: 'https://sap-app1.cfapps.eu10-004.hana.ondemand.com'
 };

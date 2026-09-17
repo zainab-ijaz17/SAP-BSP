@@ -1,12 +1,16 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'com.packages.app',
-  appName: 'SAP App',
+  appId: 'com.packages.app.v1',
+  appName: 'SAP BSP',
   webDir: 'build',
   server: {
-    // Remove url to use local assets
-    cleartext: true
+    androidScheme: 'https'
+  },
+  plugins: {
+    CapacitorHttp: {
+      enabled: true
+    }
   }
 };
 

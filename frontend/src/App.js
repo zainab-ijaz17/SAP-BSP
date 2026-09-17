@@ -1,20 +1,15 @@
 import React, { useState } from "react";
-import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate } from "react-router-dom";
+import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
 import LoginPage from "./pages/LoginPage";
 import MainPage from "./pages/MainPage";
 import BspPage from "./pages/BspPage";
 import MigoPage from "./pages/MigoPage";
+import CharPage from "./pages/CharPage";
+import CharMigoPage from "./pages/CharMigoPage";
 import SplashScreen from "./pages/SplashScreen";
-
-function SplashScreenWrapper() {
-  const navigate = useNavigate();
-  
-  const handleFinish = () => {
-    navigate("/login");
-  };
-
-  return <SplashScreen onFinish={handleFinish} />;
-}
+import ReelReceivingPage from "./pages/ReelReceivingPage";
+import ScanPage from "./pages/ScanPage";
+import ReelConfirmPage from "./pages/ReelConfirmPage";
 
 function App() {
   const [user, setUser] = useState(null);
@@ -35,7 +30,9 @@ function App() {
         <Routes>
           <Route 
             path="/" 
-            element={<SplashScreenWrapper />}
+            element={
+              <SplashScreen user={user} />
+            } 
           />
           <Route 
             path="/login" 
@@ -77,6 +74,46 @@ function App() {
                 <MigoPage user={user} onLogout={handleLogout} />
               </ProtectedRoute>
             } 
+          />
+          <Route 
+            path="/char" 
+            element={
+              <ProtectedRoute>
+                <CharPage user={user} onLogout={handleLogout} />
+              </ProtectedRoute>
+            } 
+          />
+          <Route
+            path="/char-migo"
+            element={
+              <ProtectedRoute>
+                <CharMigoPage user={user} onLogout={handleLogout} />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/reel-receiving"
+            element={
+              <ProtectedRoute>
+                <ReelReceivingPage user={user} onLogout={handleLogout} />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/scan"
+            element={
+              <ProtectedRoute>
+                <ScanPage user={user} onLogout={handleLogout} />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/reel-confirm"
+            element={
+              <ProtectedRoute>
+                <ReelConfirmPage user={user} onLogout={handleLogout} />
+              </ProtectedRoute>
+            }
           />
         </Routes>
       </div>

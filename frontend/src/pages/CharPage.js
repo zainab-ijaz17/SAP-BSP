@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { getUserCredentials } from '../api';
 
-function BspPage({ user, onLogout }) {
+function CharPage({ user, onLogout }) {
   const navigate = useNavigate();
   const location = useLocation();
   const [batchNumber, setBatchNumber] = useState("");
@@ -21,15 +21,19 @@ function BspPage({ user, onLogout }) {
     return '';
   });
 
+  // Complete mapping configuration for the modal details viewer
   const fieldLabels = {
     Charg: "Batch Number",
+    SalesOrder: "Sales Order",
+    SoItem: "Sales Order Item",
     Werks: "Plant Number",
     MATNR: "Material Number",
     MAKTX: "Material Description",
-    QTY: "Quantity",
     LGORT: "Storage Location",
     MEINS: "Unit of Measure",
-    SOBKZ: "Special Stock"
+    SOBKZ: "Special Stock",
+    QTY: "Quantity",
+    NoOfSheets: "Number of Sheets"
   };
 
   useEffect(() => {
@@ -45,7 +49,7 @@ function BspPage({ user, onLogout }) {
 
     const nextState = { ...(location.state || {}) };
     delete nextState.prefillBatches;
-    navigate('/bsp', { replace: true, state: Object.keys(nextState).length ? nextState : null });
+    navigate('/char', { replace: true, state: Object.keys(nextState).length ? nextState : null });
   }, [location.state, navigate]);
 
   const handleLogout = () => {
@@ -72,25 +76,66 @@ function BspPage({ user, onLogout }) {
       const creds = getUserCredentials();
       if (!creds) throw new Error("User not authenticated. Please log in again.");
 
-      // Use different URLs based on environment
-      const isProduction = creds.environment === '300' || creds.environment === 'prd';
-      const baseUrl = isProduction 
-        ? 'https://sap-app1.cfapps.eu10-004.hana.ondemand.com'  // Local server for production (300/prd)
-        : 'https://sap-app1.cfapps.eu10-004.hana.ondemand.com';  // Default for development (110/dev)
+      const baseUrl = 'https://sap-app1.cfapps.eu10-004.hana.ondemand.com';
       
-      const endpoint = `/api/BatchInfoGateway/${input}`;
+      const batchEndpoint = `/api/BatchInfoGateway/${input}`;
+      const charEndpoint = `/api/BatchCharacteristics/${input}`;
       
-      const res = await fetch(`${baseUrl}${endpoint}`, {
-        headers: {
-          'X-User-Auth': btoa(`${creds.username}:${creds.password}`),
-          'X-User-Environment': creds.environment
+      const headers = {
+        'X-User-Auth': btoa(`${creds.username}:${creds.password}`),
+        'X-User-Environment': creds.environment
+      };
+
+      // Both pipelines run simultaneously 
+      const [batchResult, charResult] = await Promise.allSettled([
+        fetch(`${baseUrl}${batchEndpoint}`, { headers }),
+        fetch(`${baseUrl}${charEndpoint}`, { headers })
+      ]);
+
+      // Check Core Batch validation checks
+      if (batchResult.status === "rejected") {
+        throw new Error(`Failed core request: ${batchResult.reason.message}`);
+      }
+      
+      const resBatch = batchResult.value;
+      if (!resBatch.ok) throw new Error("Failed to fetch core batch information from SAP.");
+
+      const json = await resBatch.json();
+      const d = json?.d || json; 
+      if (!d?.Charg) throw new Error("Failed to fetch batch information. Empty response object.");
+
+      // Parse Characteristics safely
+      let noOfSheets = "-";
+      if (charResult.status === "fulfilled" && charResult.value.ok) {
+        try {
+          const charJson = await charResult.value.json();
+          const resultsArray = Array.isArray(charJson) ? charJson : (charJson?.d?.results || []);
+          const sheetRecord = resultsArray.find(
+  item =>
+    item.CharName === "Z_1223_NO_OF_SHEETS" ||
+    item.CharacteristicName === "Z_1223_NO_OF_SHEETS" ||
+    item.ATNAM === "Z_1223_NO_OF_SHEETS"
+);
+          
+          if (sheetRecord && sheetRecord.CharValue) {
+            const rawValue =
+  sheetRecord.CharValue ||
+  sheetRecord.CharacteristicValue ||
+  sheetRecord.ATWRT;
+            noOfSheets = isNaN(Number(rawValue)) ? rawValue : String(Number(rawValue));
+          }
+        } catch (e) {
+          console.warn("Characteristics payload extraction parsing warning:", e);
         }
-      });
-      if (!res.ok) throw new Error("Failed to fetch batch information.");
-      const json = await res.json();
-      const d = json?.d || json; // Handle both old and new response formats
-      if (!d?.Charg || Number(d.QTY) <= 0) throw new Error("Failed to fetch batch information");
-      setBatches(prev => [...prev, { d: d }]); // Ensure consistent structure
+      }
+
+      // Merge data and preserve all standard fields + sheets for MIGO pipeline mapping
+const augmentedData = {
+  ...d,
+  NoOfSheets: noOfSheets
+};
+
+      setBatches(prev => [...prev, { d: augmentedData }]);
       setBatchNumber("");
     } catch (err) {
       setError(err.message);
@@ -99,12 +144,14 @@ function BspPage({ user, onLogout }) {
     }
   };
 
-  const cleanBatch = (batch) => {
-    const batchToSend = { ...(batch?.d || batch) };
-    delete batchToSend.__metadata;
-    delete batchToSend.__batchInfo;
-    return batchToSend;
-  };
+const cleanBatch = (batch) => {
+  const batchToSend = { ...(batch?.d || batch) };
+
+  delete batchToSend.__metadata;
+  delete batchToSend.__batchInfo;
+
+  return batchToSend;
+};
 
   const deleteOne = (charg) => {
     setBatches(prev => prev.filter(b => b.d?.Charg !== charg));
@@ -145,7 +192,7 @@ function BspPage({ user, onLogout }) {
   const next = () => {
     if (batches.length === 0) return setError("Please add at least one batch.");
     const batchListToSend = batches.map(cleanBatch);
-    navigate("/migo", { state: { batchData: batchListToSend } });
+    navigate("/char-migo", { state: { batchData: batchListToSend } });
   };
 
   return (
@@ -165,56 +212,19 @@ function BspPage({ user, onLogout }) {
       {/* Logout Confirmation Dialog */}
       {showLogoutConfirm && (
         <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.5)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 1000
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.5)', display: 'flex',
+          alignItems: 'center', justifyContent: 'center', zIndex: 1000
         }}>
           <div style={{
-            backgroundColor: 'white',
-            padding: '2rem',
-            borderRadius: '12px',
-            boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-            maxWidth: '400px',
-            width: '90%'
+            backgroundColor: 'white', padding: '2rem', borderRadius: '12px',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.15)', maxWidth: '400px', width: '90%'
           }}>
             <h3 style={{ margin: '0 0 1rem 0', color: '#333' }}>Confirm Logout</h3>
-            <p style={{ margin: '0 0 1.5rem 0', color: '#666' }}>
-              Are you sure you want to logout?
-            </p>
+            <p style={{ margin: '0 0 1.5rem 0', color: '#666' }}>Are you sure you want to logout?</p>
             <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end' }}>
-              <button
-                onClick={cancelLogout}
-                style={{
-                  padding: '0.75rem 1.5rem',
-                  border: '1px solid #ddd',
-                  backgroundColor: 'white',
-                  color: '#666',
-                  borderRadius: '6px',
-                  cursor: 'pointer'
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={confirmLogout}
-                style={{
-                  padding: '0.75rem 1.5rem',
-                  border: 'none',
-                  backgroundColor: '#dc3545',
-                  color: 'white',
-                  borderRadius: '6px',
-                  cursor: 'pointer'
-                }}
-              >
-                Yes, Logout
-              </button>
+              <button onClick={cancelLogout} style={{ padding: '0.75rem 1.5rem', border: '1px solid #ddd', backgroundColor: 'white', color: '#666', borderRadius: '6px', cursor: 'pointer' }}>Cancel</button>
+              <button onClick={confirmLogout} style={{ padding: '0.75rem 1.5rem', border: 'none', backgroundColor: '#dc3545', color: 'white', borderRadius: '6px', cursor: 'pointer' }}>Yes, Logout</button>
             </div>
           </div>
         </div>
@@ -223,56 +233,19 @@ function BspPage({ user, onLogout }) {
       {/* Clear All Confirmation Dialog */}
       {showClearAllConfirm && (
         <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.5)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 1000
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.5)', display: 'flex',
+          alignItems: 'center', justifyContent: 'center', zIndex: 1000
         }}>
           <div style={{
-            backgroundColor: 'white',
-            padding: '2rem',
-            borderRadius: '12px',
-            boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-            maxWidth: '400px',
-            width: '90%'
+            backgroundColor: 'white', padding: '2rem', borderRadius: '12px',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.15)', maxWidth: '400px', width: '90%'
           }}>
             <h3 style={{ margin: '0 0 1rem 0', color: '#333' }}>Clear All Batches</h3>
-            <p style={{ margin: '0 0 1.5rem 0', color: '#666' }}>
-              Are you sure you want to clear all batches? This action cannot be undone.
-            </p>
+            <p style={{ margin: '0 0 1.5rem 0', color: '#666' }}>Are you sure you want to clear all batches? This action cannot be undone.</p>
             <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end' }}>
-              <button
-                onClick={cancelClearAll}
-                style={{
-                  padding: '0.75rem 1.5rem',
-                  border: '1px solid #ddd',
-                  backgroundColor: 'white',
-                  color: '#666',
-                  borderRadius: '6px',
-                  cursor: 'pointer'
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={confirmClearAll}
-                style={{
-                  padding: '0.75rem 1.5rem',
-                  border: 'none',
-                  backgroundColor: '#ef4444',
-                  color: 'white',
-                  borderRadius: '6px',
-                  cursor: 'pointer'
-                }}
-              >
-                Clear All
-              </button>
+              <button onClick={cancelClearAll} style={{ padding: '0.75rem 1.5rem', border: '1px solid #ddd', backgroundColor: 'white', color: '#666', borderRadius: '6px', cursor: 'pointer' }}>Cancel</button>
+              <button onClick={confirmClearAll} style={{ padding: '0.75rem 1.5rem', border: 'none', backgroundColor: '#ef4444', color: 'white', borderRadius: '6px', cursor: 'pointer' }}>Clear All</button>
             </div>
           </div>
         </div>
@@ -287,7 +260,7 @@ function BspPage({ user, onLogout }) {
               <button
                 onClick={() => {
                   setSuccess('');
-                  navigate('/bsp', { replace: true, state: null });
+                  navigate('/char', { replace: true, state: null });
                 }}
                 style={{ padding: "0.35rem 0.75rem", background: "transparent", color: "#166534", border: "1px solid rgba(22,101,52,0.35)", borderRadius: "8px", cursor: "pointer" }}
               >
@@ -319,19 +292,9 @@ function BspPage({ user, onLogout }) {
             </button>
           </div>
 
-          <div
-  style={{
-    marginTop: "0.75rem",
-    textAlign: "center",
-    fontWeight: "600",
-    color: "#374151",
-    padding: "0.75rem",
-    background: "#f3f4f6",
-    borderRadius: "8px"
-  }}
->
-  Batches Scanned: {batches.length}
-</div>
+          <div style={{ marginTop: "0.75rem", textAlign: "center", fontWeight: "600", color: "#374151", padding: "0.75rem", background: "#f3f4f6", borderRadius: "8px" }}>
+            Batches Scanned: {batches.length}
+          </div>
 
           {error && <div style={{ background: "#fee2e2", color: "#b91c1c", padding: "0.75rem", borderRadius: "8px", marginTop: "0.5rem" }}>{error}</div>}
 
@@ -341,7 +304,7 @@ function BspPage({ user, onLogout }) {
                 <thead>
                   <tr>
                     <th style={{ textAlign: "center", padding: "0.5rem", fontSize: "0.75rem" }}>Batch #</th>
-                    <th style={{ textAlign: "center", padding: "0.5rem", fontSize: "0.75rem" }}>Quantity</th>
+                    <th style={{ textAlign: "center", padding: "0.5rem", fontSize: "0.75rem" }}>Sheets</th>
                     <th style={{ textAlign: "center", padding: "0.5rem", fontSize: "0.75rem" }}>Loc</th>
                     <th style={{ textAlign: "center", padding: "0.5rem", fontSize: "0.75rem" }}></th>
                   </tr>
@@ -354,11 +317,14 @@ function BspPage({ user, onLogout }) {
                       style={{ cursor: "pointer", background: selectedBatch?.d?.Charg === batch.d?.Charg ? "#e0f2fe" : "white", borderBottom: "12px solid #f3f4f6" }}
                     >
                       <td style={{ textAlign: "center", padding: "0.5rem" , fontSize: "0.75rem" }}>{batch.d?.Charg}</td>
-                      <td style={{ textAlign: "center", padding: "0.5rem" , fontSize: "0.75rem" }}>{batch.d?.QTY}</td>
+                      <td style={{ textAlign: "center", padding: "0.5rem" , fontSize: "0.75rem" }}>{batch.d?.NoOfSheets}</td>
                       <td style={{ textAlign: "center", padding: "0.5rem" , fontSize: "0.75rem" }}>{batch.d?.LGORT || '-'}</td>
-                      <td style={{ textAlign: "center", padding: "0.5rem" }} onClick={(e) => e.stopPropagation()}>
+                      <td style={{ textAlign: "center", padding: "0.5rem" }}>
                         <button
-                          onClick={() => deleteOne(batch.d?.Charg)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            deleteOne(batch.d?.Charg);
+                          }}
                           style={{ padding: "0.35rem 0.75rem", background: "#ef4444", color: "#fff", border: "none", borderRadius: "8px" }}
                         >
                           Delete
@@ -373,58 +339,44 @@ function BspPage({ user, onLogout }) {
         </div>
       </div>
 
-
       <div style={{ position: "fixed", bottom: "20px", left: "20px" }}>
-        <button
-          onClick={handleBack}
-          disabled={loading}
-          style={{ padding: "0.85rem 2rem", background: "#6b7280", color: "#fff", border: "none", borderRadius: "8px" }}
-        >
+        <button onClick={handleBack} disabled={loading} style={{ padding: "0.85rem 2rem", background: "#6b7280", color: "#fff", border: "none", borderRadius: "8px" }}>
           Back
         </button>
       </div>
 
       <div style={{ position: "fixed", bottom: "20px", right: "20px" }}>
-        <button
-          onClick={next}
-          disabled={batches.length === 0 || loading}
-          style={{ padding: "0.85rem 2rem", background: "#3b82f6", color: "#fff", border: "none", borderRadius: "8px" }}
-        >
+        <button onClick={next} disabled={batches.length === 0 || loading} style={{ padding: "0.85rem 2rem", background: "#3b82f6", color: "#fff", border: "none", borderRadius: "8px" }}>
           Next
         </button>
       </div>
 
+      {/* Details Popup Modal */}
       {showDetailsPopup && selectedBatch && (
-        <div
-          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem", zIndex: 60 }}
-          onClick={closeDetails}
-        >
-          <div
-            style={{ width: "100%", maxWidth: "620px", background: "white", borderRadius: "12px", padding: "1.5rem", boxShadow: "0 10px 30px rgba(0,0,0,0.25)", maxHeight: "80vh", overflow: "auto" }}
-            onClick={(e) => e.stopPropagation()}
-          >
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem", zIndex: 60 }} onClick={closeDetails}>
+          <div style={{ width: "100%", maxWidth: "620px", background: "white", borderRadius: "12px", padding: "1.5rem", boxShadow: "0 10px 30px rgba(0,0,0,0.25)", maxHeight: "80vh", overflow: "auto" }} onClick={(e) => e.stopPropagation()}>
             <h3 style={{ marginTop: 0 }}>Batch Details</h3>
-
             <div style={{ border: "1px solid #e5e7eb", borderRadius: "10px", overflow: "hidden" }}>
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <tbody>
-                  {Object.entries(cleanBatch(selectedBatch)).map(([key, value]) => (
-                    <tr key={key} style={{ borderBottom: "1px solid #f3f4f6" }}>
-                      <td style={{ padding: "0.75rem", width: "45%", color: "#374151", fontWeight: 600, background: "#f9fafb" }}>
-                        {fieldLabels[key] || key}
-                      </td>
-                      <td style={{ padding: "0.75rem", color: "#111827" }}>{String(value ?? "")}</td>
-                    </tr>
-                  ))}
+                  {Object.entries(fieldLabels).map(([key, label]) => {
+                    const value = selectedBatch.d?.[key];
+                    return (
+                      <tr key={key} style={{ borderBottom: "1px solid #f3f4f6" }}>
+                        <td style={{ padding: "0.75rem", width: "45%", color: "#374151", fontWeight: 600, background: "#f9fafb" }}>
+                          {label}
+                        </td>
+                        <td style={{ padding: "0.75rem", color: "#111827" }}>
+                          {String(value ?? "-")}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
-
             <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "1.25rem" }}>
-              <button
-                onClick={closeDetails}
-                style={{ padding: "0.85rem 2rem", background: "#6b7280", color: "#fff", border: "none", borderRadius: "8px" }}
-              >
+              <button onClick={closeDetails} style={{ padding: "0.85rem 2rem", background: "#6b7280", color: "#fff", border: "none", borderRadius: "8px" }}>
                 Close
               </button>
             </div>
@@ -435,4 +387,4 @@ function BspPage({ user, onLogout }) {
   );
 }
 
-export default BspPage;
+export default CharPage;
