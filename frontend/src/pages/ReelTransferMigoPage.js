@@ -21,7 +21,7 @@ function ReelTransferMigoPage({ user, onLogout }) {
 
   const [formData, setFormData] = useState({
     storageLocationTo: '',
-    specialStock: 'E',
+    specialStock: '',
     newBatch: ''
   });
 
@@ -68,7 +68,7 @@ function ReelTransferMigoPage({ user, onLogout }) {
         Quantity: String(batchItem.QTY || '0'),
         EntryUom: batchItem.MEINS || '',
         Batch: batchItem.Charg || '',
-        SpecStock: formData.specialStock || batchItem.SOBKZ || 'E',
+        SpecStock: formData.specialStock || batchItem.SOBKZ || '',
         StgeLocTo: formData.storageLocationTo || '',
         BatchTo: batchItem.Charg || '',
         MoveType: MOVEMENT_TYPE_TRANSFER

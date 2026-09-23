@@ -105,7 +105,6 @@ router.post('/check', async (req, res) => {
             'Quantity',
             'EntryUom',
             'Batch',
-            'SpecStock',
             'StgeLocTo',
             'BatchTo',
             'MoveType'
@@ -445,7 +444,6 @@ router.post('/post', async (req, res) => {
             'Quantity',
             'EntryUom',
             'Batch',
-            'SpecStock',
             'StgeLocTo',
             'BatchTo',
             'MoveType'
