@@ -414,11 +414,26 @@ router.get("/BatchInfoGateway/:batchNumber", async (req, res) => {
       if (response.status === 200) {
         const batchData = response.data?.d?.results;
         if (batchData && batchData.length > 0) {
-          return res.json(batchData[0]);
+          const b = batchData[0];
+          // ZMH_BATCH_INFO_SRV returns Pascal-case fields (Qty, Lgort, Matnr, ...)
+          // but the frontend (BspPage.js, ReelTransferMigoPage.js, etc.) was built
+          // against the old service's naming - normalize to match.
+          return res.json({
+            Charg: b.Charg,
+            Werks: b.Werks,
+            MATNR: b.Matnr,
+            MAKTX: b.Maktx,
+            QTY: b.Qty,
+            LGORT: b.Lgort,
+            MEINS: b.Meins,
+            SOBKZ: b.Sobkz,
+            SalesOrder: b.SalesOrder,
+            SoItem: b.SoItem
+          });
         }
         return res.status(404).json({ error: "Batch not found" });
       }
-      
+
       return res.status(response.status || 500).json({
         error: "Error from SAP API Management",
         status: response.status,
