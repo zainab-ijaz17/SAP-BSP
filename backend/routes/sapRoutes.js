@@ -187,8 +187,11 @@ router.get("/BatchInfoGateway/:batchNumber", async (req, res) => {
     // Use the full endpoint URL directly
     // OData filter syntax: $filter=FieldName eq 'value'
     // Note: the BatchInfo entity type only has a 'Charg' property — filtering on
-    // 'BatchNumber' fails with "Property BatchNumber not found in type BatchInfo"
-    let url = `${baseUrl}?$filter=Charg eq '${batchNumber}'`;
+    // 'BatchNumber' fails with "Property BatchNumber not found in type BatchInfo".
+    // Its key is Charg+Werks+Matnr+Lgort - a Charg-only filter can silently miss
+    // batch numbers reused across plants, so Werks (this app's plant, 1212) is
+    // included too.
+    let url = `${baseUrl}?$filter=Charg eq '${batchNumber}' and Werks eq '1212'`;
     console.log('Trying URL format 1:', url);
     console.log(`[${new Date().toISOString()}] PRODUCTION: Fetching batch ${batchNumber} from ${url}`);
     
