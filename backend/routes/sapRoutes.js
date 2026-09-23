@@ -186,7 +186,9 @@ router.get("/BatchInfoGateway/:batchNumber", async (req, res) => {
     const baseUrl = process.env.PRD_300_BATCH_URL || 'https://prdspace.prod01.apimanagement.eu10.hana.ondemand.com/bsp/prd/batch/BatchInfoSet';
     // Use the full endpoint URL directly
     // OData filter syntax: $filter=FieldName eq 'value'
-    let url = `${baseUrl}?$filter=BatchNumber eq '${batchNumber}'`;
+    // Note: the BatchInfo entity type only has a 'Charg' property — filtering on
+    // 'BatchNumber' fails with "Property BatchNumber not found in type BatchInfo"
+    let url = `${baseUrl}?$filter=Charg eq '${batchNumber}'`;
     console.log('Trying URL format 1:', url);
     console.log(`[${new Date().toISOString()}] PRODUCTION: Fetching batch ${batchNumber} from ${url}`);
     
@@ -347,39 +349,6 @@ router.get("/BatchInfoGateway/:batchNumber", async (req, res) => {
         return res.status(404).json({ error: "Batch not found" });
       }
       
-      // If 400 error, try with Charg field name instead of BatchNumber (some SAP services use different field names)
-      if (response.status === 400) {
-        console.log('Trying alternative filter with Charg field name');
-        const altUrl = `${baseUrl}?$filter=Charg eq '${batchNumber}'`;
-        try {
-          const altResponse = await axios.get(altUrl, {
-            httpsAgent: new https.Agent({ 
-              rejectUnauthorized: false,
-              requestCert: false
-            }),
-            auth: {
-              username: username,
-              password: password
-            },
-            headers: headers,
-            validateStatus: () => true,
-            timeout: 30000,
-            maxRedirects: 0
-          });
-          
-          if (altResponse.status === 200) {
-            const batchData = altResponse.data?.d?.results || [altResponse.data];
-            if (batchData && batchData.length > 0) {
-              return res.json(Array.isArray(batchData) ? batchData[0] : batchData);
-            }
-            return res.status(404).json({ error: "Batch not found" });
-          }
-          console.log('Alternative URL also failed with status:', altResponse.status);
-        } catch (altError) {
-          console.error('Error with alternative URL:', altError.message);
-        }
-      }
-      
       return res.status(response.status || 500).json({
         error: "Error from SAP API",
         status: response.status,
@@ -432,6 +401,9 @@ router.get("/BatchInfoGateway/:batchNumber", async (req, res) => {
         validateStatus: () => true, // handle status manually
         timeout: 30000 // 30 second timeout
       });
+
+      console.log(`Response status: ${response.status} (${response.statusText})`);
+      console.log('Response data:', JSON.stringify(response.data, null, 2));
 
       if (response.status === 200) {
         const batchData = response.data?.d?.results;
