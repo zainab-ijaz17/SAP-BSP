@@ -21,7 +21,6 @@ function ReelTransferMigoPage({ user, onLogout }) {
 
   const [formData, setFormData] = useState({
     storageLocationTo: '',
-    specialStock: '',
     newBatch: ''
   });
 
@@ -68,7 +67,7 @@ function ReelTransferMigoPage({ user, onLogout }) {
         Quantity: String(batchItem.QTY || '0'),
         EntryUom: batchItem.MEINS || '',
         Batch: batchItem.Charg || '',
-        SpecStock: formData.specialStock || batchItem.SOBKZ || '',
+        SpecStock: batchItem.SOBKZ || '',
         StgeLocTo: formData.storageLocationTo || '',
         BatchTo: batchItem.Charg || '',
         MoveType: MOVEMENT_TYPE_TRANSFER
@@ -87,7 +86,7 @@ function ReelTransferMigoPage({ user, onLogout }) {
       Quantity: String(batchItem.QTY || '0'),
       EntryUom: batchItem.MEINS || '',
       Batch: batchItem.Charg || '',
-      SpecStock: formData.specialStock || batchItem.SOBKZ || 'E',
+      SpecStock: batchItem.SOBKZ || '',
       StgeLocTo: formData.storageLocationTo || '',
       BatchTo: formData.newBatch || '',
       MoveType: MOVEMENT_TYPE_BATCH
@@ -297,18 +296,6 @@ function ReelTransferMigoPage({ user, onLogout }) {
               />
             </div>
           )}
-
-          <div className="form-group" style={{ marginTop: '16px' }}>
-            <label style={{ display: 'block', marginBottom: '6px' }}>Special Stock</label>
-            <input
-              type="text"
-              name="specialStock"
-              value={formData.specialStock}
-              onChange={handleChange}
-              className="form-control"
-              required
-            />
-          </div>
         </div>
       </div>
 
