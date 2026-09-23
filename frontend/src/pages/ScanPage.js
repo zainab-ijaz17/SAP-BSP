@@ -3,6 +3,12 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { getUserCredentials } from '../api';
 import PageHeader from '../components/PageHeader';
 
+// Routed through our backend (not called directly from the browser) since
+// SAP API Management doesn't return CORS headers for browser requests.
+// TODO: switch to the deployed CF app (https://sap-app1.cfapps.eu10-004.hana.ondemand.com)
+// once the reel routes are pushed there — for now the backend only runs locally.
+const BACKEND_BASE_URL = "http://localhost:5000";
+
 function ScanPage({ user, onLogout }) {
   const location = useLocation();
   const navigate = useNavigate();
@@ -11,6 +17,8 @@ function ScanPage({ user, onLogout }) {
   
   const [scannedBatch, setScannedBatch] = useState('');
   const [matchedBatches, setMatchedBatches] = useState([]); // { material, isMatched: true/false }
+  const [scanning, setScanning] = useState(false);
+  const [scanError, setScanError] = useState('');
   const [selectedBatch, setSelectedBatch] = useState(null);
   const [showDetailsPopup, setShowDetailsPopup] = useState(false);
   const [showLeftovers, setShowLeftovers] = useState(false);
@@ -30,17 +38,27 @@ function ScanPage({ user, onLogout }) {
     }
   }, [documentData, materials, navigate]);
 
-  // Extract batch number from barcode (handle various formats)
+  // Extract batch number from barcode (handle various formats).
+  // Batches are stored in SAP as 10-char zero-padded numbers, same as the DN,
+  // so pad short scans/manual entries out to match BatchInfoSet's key.
   const extractBatchNumber = (barcode) => {
     if (!barcode) return '';
-    // Remove whitespace and common prefixes
     const cleaned = barcode.trim().toUpperCase();
-    // If it's just numbers/letters, return as-is
-    return cleaned;
+    if (!cleaned) return '';
+    return /^[0-9]+$/.test(cleaned) ? cleaned.padStart(10, '0') : cleaned;
   };
 
-  const handleScan = () => {
-    if (!scannedBatch.trim()) {
+  const addScannedBatch = (entry) => {
+    setMatchedBatches(prev => {
+      const key = entry.Batch || entry.scannedBatch;
+      const exists = prev.some(b => (b.Batch || b.scannedBatch) === key);
+      if (exists) return prev;
+      return [...prev, entry];
+    });
+  };
+
+  const handleScan = async () => {
+    if (!scannedBatch.trim() || scanning) {
       return;
     }
 
@@ -49,50 +67,62 @@ function ScanPage({ user, onLogout }) {
       return;
     }
 
-    // Find matching material in document
-    const matchedMaterial = materials.find(m => 
-      (m.Batch || '').trim().toUpperCase() === batchNumber
-    );
+    setScanError('');
+    setScanning(true);
+    try {
+      const creds = getUserCredentials();
+      if (!creds) throw new Error('User not authenticated. Please log in again.');
 
-    if (matchedMaterial) {
-      // Scenario 1: Batch Match Found
-      const newMatch = {
-        ...matchedMaterial,
-        isMatched: true,
-        scannedBatch: batchNumber
-      };
-      setMatchedBatches(prev => {
-        // Avoid duplicates
-        const exists = prev.some(b => 
-          b.Batch === matchedMaterial.Batch && b.isMatched === true
-        );
-        if (exists) return prev;
-        return [...prev, newMatch];
+      const endpoint = `${BACKEND_BASE_URL}/api/reel/rcv/batch/${encodeURIComponent(batchNumber)}`;
+      const res = await fetch(endpoint, {
+        headers: {
+          "X-User-Auth": btoa(`${creds.username}:${creds.password}`),
+          "X-User-Environment": creds.environment,
+        },
       });
-    } else {
-      // Scenario 2: Batch Not Found
-      const notMatched = {
-        Material: 'Not in Document',
-        Description: 'Not in Document',
-        MatDesc: 'Not in Document',
-        Batch: batchNumber,
-        Quantity: '',
-        isMatched: false,
-        scannedBatch: batchNumber
-      };
-      setMatchedBatches(prev => {
-        const exists = prev.some(b => 
-          b.scannedBatch === batchNumber && b.isMatched === false
-        );
-        if (exists) return prev;
-        return [...prev, notMatched];
-      });
-    }
 
-    // Clear input and refocus
-    setScannedBatch('');
-    if (inputRef.current) {
-      inputRef.current.focus();
+      if (!res.ok) {
+        if (res.status === 404) {
+          addScannedBatch({
+            Material: 'Not Found',
+            Description: 'Batch not found in system',
+            Batch: batchNumber,
+            Quantity: '',
+            isMatched: false,
+            isValid: false,
+            scannedBatch: batchNumber,
+            apiMessage: 'Batch not found in system',
+          });
+          return;
+        }
+        const body = await res.json().catch(() => null);
+        console.error("Batch lookup failed:", { status: res.status, statusText: res.statusText, body });
+        throw new Error(body?.error || `Batch lookup failed (HTTP ${res.status}).`);
+      }
+
+      const json = await res.json();
+      const info = json?.d;
+      if (!info) throw new Error('Empty response from batch lookup.');
+
+      const isValid = info.Status ? info.Status === 'S' : true;
+      const batchKey = (info.Batch || batchNumber).trim().toUpperCase();
+      const isMatched = materials.some(m => (m.Batch || '').trim().toUpperCase() === batchKey);
+
+      addScannedBatch({
+        ...info,
+        scannedBatch: batchNumber,
+        isMatched,
+        isValid,
+        apiMessage: info.Message || '',
+      });
+    } catch (err) {
+      setScanError(err.message);
+    } finally {
+      setScanning(false);
+      setScannedBatch('');
+      if (inputRef.current) {
+        inputRef.current.focus();
+      }
     }
   };
 
@@ -157,11 +187,11 @@ function ScanPage({ user, onLogout }) {
   };
 
   const handleNext = () => {
-    // Navigate to MIGO page with matched batches
-    const matchedOnly = matchedBatches.filter(b => b.isMatched);
+    // Navigate to MIGO page with matched, validated batches
+    const matchedOnly = matchedBatches.filter(b => b.isMatched && b.isValid !== false);
     if (matchedOnly.length === 0) {
       // Show popup for no matched batches
-      alert('No matched batches found. Please scan at least one matching batch before proceeding.');
+      alert('No valid matched batches found. Please scan at least one matching batch that passed validation before proceeding.');
       return;
     }
     
@@ -208,32 +238,37 @@ function ScanPage({ user, onLogout }) {
               }}
               autoFocus
             />
+            {scanError && (
+              <div style={{ background: "#fee2e2", color: "#b91c1c", padding: "0.75rem", borderRadius: "8px", marginBottom: "0.75rem" }}>
+                {scanError}
+              </div>
+            )}
             <div style={{ display: "flex", gap: "0.5rem" }}>
               <button
                 onClick={handleScan}
-                disabled={!scannedBatch.trim()}
-                style={{ 
+                disabled={!scannedBatch.trim() || scanning}
+                style={{
                   flex: 1,
-                  padding: "0.85rem 2rem", 
-                  background: scannedBatch.trim() ? "#3b82f6" : "#9ca3af", 
-                  color: "#fff", 
-                  border: "none", 
-                  borderRadius: "8px", 
-                  cursor: scannedBatch.trim() ? "pointer" : "not-allowed" 
+                  padding: "0.85rem 2rem",
+                  background: (scannedBatch.trim() && !scanning) ? "#3b82f6" : "#9ca3af",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: "8px",
+                  cursor: (scannedBatch.trim() && !scanning) ? "pointer" : "not-allowed"
                 }}
               >
-                Scan
+                {scanning ? "Checking..." : "Scan"}
               </button>
               <button
                 onClick={handleFinishOffloading}
-                style={{ 
+                style={{
                   flex: 1,
-                  padding: "0.85rem 2rem", 
-                  background: "#10b981", 
-                  color: "#fff", 
-                  border: "none", 
-                  borderRadius: "8px", 
-                  cursor: "pointer" 
+                  padding: "0.85rem 2rem",
+                  background: "#10b981",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: "8px",
+                  cursor: "pointer"
                 }}
               >
                 Finish Offloading
@@ -250,12 +285,12 @@ function ScanPage({ user, onLogout }) {
                   <div 
                     key={index} 
                     onClick={() => openFullInfoPopup(batch)}
-                    style={{ 
+                    style={{
                       marginBottom: "1rem",
                       padding: "1rem",
                       border: "1px solid #e5e7eb",
                       borderRadius: "8px",
-                      backgroundColor: batch.isMatched ? "#f0fdf4" : "#fef2f2",
+                      backgroundColor: !batch.isMatched ? "#fef2f2" : (batch.isValid === false ? "#fff7ed" : "#f0fdf4"),
                       cursor: "pointer"
                     }}
                   >
@@ -273,7 +308,7 @@ function ScanPage({ user, onLogout }) {
                     </div>
                     <div style={{ display: "flex", marginBottom: "0.5rem" }}>
                       <strong style={{ minWidth: "120px" }}>Width:</strong>
-                      <span>{batch.Width || '-'}</span>
+                      <span>{batch.ReelWidth ? `${batch.ReelWidth} ${batch.WidthUnit || ''}` : '-'}</span>
                     </div>
                     <div style={{ display: "flex", marginBottom: "0.5rem" }}>
                       <strong style={{ minWidth: "120px" }}>Quantity:</strong>
@@ -282,13 +317,21 @@ function ScanPage({ user, onLogout }) {
                     <div style={{ display: "flex" }}>
                       <strong style={{ minWidth: "120px" }}>Status:</strong>
                       <span>
-                        {batch.isMatched ? (
-                          <span style={{ color: "#10b981", fontWeight: 600 }}>✓ Matched</span>
-                        ) : (
+                        {!batch.isMatched ? (
                           <span style={{ color: "#ef4444", fontWeight: 600 }}>✗ Not Matched</span>
+                        ) : batch.isValid === false ? (
+                          <span style={{ color: "#f59e0b", fontWeight: 600 }}>⚠ Validation Failed</span>
+                        ) : (
+                          <span style={{ color: "#10b981", fontWeight: 600 }}>✓ Matched</span>
                         )}
                       </span>
                     </div>
+                    {batch.apiMessage && (
+                      <div style={{ display: "flex", marginTop: "0.5rem" }}>
+                        <strong style={{ minWidth: "120px" }}>Message:</strong>
+                        <span style={{ color: batch.isValid === false ? "#b91c1c" : "#374151" }}>{batch.apiMessage}</span>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -327,7 +370,7 @@ function ScanPage({ user, onLogout }) {
                     </div>
                     <div style={{ display: "flex", marginBottom: "0.5rem" }}>
                       <strong style={{ minWidth: "120px" }}>Width:</strong>
-                      <span>{batch.Width || '-'}</span>
+                      <span>{batch.ReelWidth ? `${batch.ReelWidth} ${batch.WidthUnit || ''}` : '-'}</span>
                     </div>
                     <div style={{ display: "flex" }}>
                       <strong style={{ minWidth: "120px" }}>Quantity:</strong>
@@ -354,14 +397,14 @@ function ScanPage({ user, onLogout }) {
       <div style={{ position: "fixed", bottom: "20px", right: "20px" }}>
         <button
           onClick={handleNext}
-          disabled={matchedBatches.filter(b => b.isMatched).length === 0 || !finishOffloadingClicked}
-          style={{ 
-            padding: "0.85rem 2rem", 
-            background: (matchedBatches.filter(b => b.isMatched).length > 0 && finishOffloadingClicked) ? "#3b82f6" : "#9ca3af", 
-            color: "#fff", 
-            border: "none", 
-            borderRadius: "8px", 
-            cursor: (matchedBatches.filter(b => b.isMatched).length > 0 && finishOffloadingClicked) ? "pointer" : "not-allowed" 
+          disabled={matchedBatches.filter(b => b.isMatched && b.isValid !== false).length === 0 || !finishOffloadingClicked}
+          style={{
+            padding: "0.85rem 2rem",
+            background: (matchedBatches.filter(b => b.isMatched && b.isValid !== false).length > 0 && finishOffloadingClicked) ? "#3b82f6" : "#9ca3af",
+            color: "#fff",
+            border: "none",
+            borderRadius: "8px",
+            cursor: (matchedBatches.filter(b => b.isMatched && b.isValid !== false).length > 0 && finishOffloadingClicked) ? "pointer" : "not-allowed"
           }}
         >
           Next
@@ -407,9 +450,15 @@ function ScanPage({ user, onLogout }) {
                 <strong style={{ minWidth: '140px' }}>Batch:</strong>
                 <span>{selectedFullInfoBatch.Batch || selectedFullInfoBatch.scannedBatch || '-'}</span>
               </div>
+              {selectedFullInfoBatch.TargetBatch && (
+                <div style={{ display: 'flex', marginBottom: '0.5rem' }}>
+                  <strong style={{ minWidth: '140px' }}>Target Batch:</strong>
+                  <span>{selectedFullInfoBatch.TargetBatch}</span>
+                </div>
+              )}
               <div style={{ display: 'flex', marginBottom: '0.5rem' }}>
                 <strong style={{ minWidth: '140px' }}>Width:</strong>
-                <span>{selectedFullInfoBatch.Width || '-'}</span>
+                <span>{selectedFullInfoBatch.ReelWidth ? `${selectedFullInfoBatch.ReelWidth} ${selectedFullInfoBatch.WidthUnit || ''}` : '-'}</span>
               </div>
               <div style={{ display: 'flex', marginBottom: '0.5rem' }}>
                 <strong style={{ minWidth: '140px' }}>Quantity:</strong>
@@ -419,16 +468,24 @@ function ScanPage({ user, onLogout }) {
                 <strong style={{ minWidth: '140px' }}>Status:</strong>
                 <span>
                   {selectedFullInfoBatch.isMatched !== undefined ? (
-                    selectedFullInfoBatch.isMatched ? (
-                      <span style={{ color: "#10b981", fontWeight: 600 }}>✓ Matched</span>
-                    ) : (
+                    !selectedFullInfoBatch.isMatched ? (
                       <span style={{ color: "#ef4444", fontWeight: 600 }}>✗ Not Matched</span>
+                    ) : selectedFullInfoBatch.isValid === false ? (
+                      <span style={{ color: "#f59e0b", fontWeight: 600 }}>⚠ Validation Failed</span>
+                    ) : (
+                      <span style={{ color: "#10b981", fontWeight: 600 }}>✓ Matched</span>
                     )
                   ) : (
                     <span style={{ color: "#f59e0b", fontWeight: 600 }}>⚠ Left Over</span>
                   )}
                 </span>
               </div>
+              {selectedFullInfoBatch.apiMessage && (
+                <div style={{ display: 'flex', marginBottom: '0.5rem' }}>
+                  <strong style={{ minWidth: '140px' }}>Message:</strong>
+                  <span style={{ color: selectedFullInfoBatch.isValid === false ? "#b91c1c" : "#374151" }}>{selectedFullInfoBatch.apiMessage}</span>
+                </div>
+              )}
               <div style={{ display: 'flex', marginBottom: '0.5rem' }}>
                 <strong style={{ minWidth: '140px' }}>Item No:</strong>
                 <span>{selectedFullInfoBatch.ItemNo || selectedFullInfoBatch.ItemNumber || '-'}</span>

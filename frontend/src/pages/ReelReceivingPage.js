@@ -1,246 +1,186 @@
 import React, { useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { getUserCredentials } from '../api';
-import PageHeader from '../components/PageHeader';
+import { useLocation, useNavigate } from "react-router-dom";
+import PageHeader from "../components/PageHeader";
+import LoadingButton from "../components/LoadingButton";
+import ConfirmModal from "../components/ConfirmModal";
+import LineItemsTable from "../components/LineItemsTable";
+import { fetchStpo, fetchStpoBatchesByMaterial } from "../api/stpoGoodsReceiptApi";
 
-// Field names follow ZREEL_RECV_SRV's confirmed BatchInfo/ReceiveItem schema
-// (Description/StorLoc/ReelWidth/WidthUnit/WidthMm), since ZREEL_DLV_SRV's own
-// $metadata hasn't been shared yet — fallbacks cover older guesses + common SAP names.
-const mapDeliveryItem = (item) => ({
-  Batch: item.Batch || item.Charg || "",
-  Material: item.Material || item.Matnr || "",
-  Description: item.Description || item.MatDesc || item.Maktx || "",
-  ReelWidth: item.ReelWidth || item.Width || "",
-  WidthUnit: item.WidthUnit || "",
-  WidthMm: item.WidthMm || "",
-  Quantity: item.Quantity || item.Menge || "",
-  Uom: item.Uom || item.Meins || item.EntryUom || "",
-  ItemNo: item.ItemNo || item.ItemNumber || item.Posnr || "",
-  Plant: item.Plant || item.Werks || "",
-  StorLoc: item.StorLoc || item.StgeLoc || item.Lgort || "",
-});
-
-const fieldLabels = {
-  Batch: "Batch Number",
-  Material: "Material Number",
-  Description: "Material Description",
-  ReelWidth: "Reel Width",
-  WidthUnit: "Width Unit",
-  WidthMm: "Width (mm)",
-  Quantity: "Quantity",
-  Uom: "Unit of Measure",
-  ItemNo: "Item Number",
-  Plant: "Plant",
-  StorLoc: "Storage Location",
-};
-
-function ReelReceivingPage({ user, onLogout }) {
+// GR for STPO — Page 1: fetch a Stock Transport Purchase Order. Based on
+// GoodReceiptPage.js; the underlying API module differs (../api/stpoGoodsReceiptApi.js)
+// since STPO posting uses a different payload. Every line item returned is forwarded
+// to Page 2. If the user navigates Back from Page 2, prefillStpoNumber/prefillLineItems
+// restore what was already fetched here instead of resetting to a blank form.
+//
+// Fetch itself already looks up the Batch(es) actually shipped for this STPO
+// (fetchStpoBatchesByMaterial() in ../api/stpoGoodsReceiptApi.js) and shows each line
+// item's Quantity as the sum of what was actually shipped across those batches —
+// never the STPO line item's ordered quantity — since what was ordered can overstate
+// what's actually available to receive. Clicking Next re-fetches the same batch data
+// and expands each line item into one row per Batch found for that Material — a
+// Material commonly ships as several batches — before handing off to GrStpo2Page,
+// with each row's own quantity/uom from that specific Batch (so posting several
+// batches for one material doesn't re-post the same total for every batch).
+function GrStpoPage({ user, onLogout }) {
+  const location = useLocation();
   const navigate = useNavigate();
-  const [dnNumber, setDnNumber] = useState("");
-  const [deliveryNumber, setDeliveryNumber] = useState("");
-  const [deliveryItems, setDeliveryItems] = useState([]);
-  const [selectedItem, setSelectedItem] = useState(null);
-  const [showDetailsPopup, setShowDetailsPopup] = useState(false);
+  const [stpoNumber, setStpoNumber] = useState(location.state?.prefillStpoNumber || "");
+  const [lineItem, setLineItem] = useState("");
+  const [lineItems, setLineItems] = useState(location.state?.prefillLineItems || []);
+  const [previewItem, setPreviewItem] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState("");
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
 
-  const fetchDelivery = async () => {
-    setError(null);
-    const input = dnNumber.trim().toUpperCase();
-    if (!input) return setError("Please enter a delivery note number.");
+  const handleFetch = async () => {
+    setError("");
+    setPreviewItem(null);
+    setLineItems([]);
+
+    if (!stpoNumber.trim()) {
+      setError("Please enter a STPO Number.");
+      return;
+    }
 
     setLoading(true);
     try {
-      const creds = getUserCredentials();
-      if (!creds) throw new Error("User not authenticated. Please log in again.");
-
-      const baseUrl = "https://devspace.test.apimanagement.eu10.hana.ondemand.com/reel-dlv";
-      const endpoint = "/sap/opu/odata/sap/ZREEL_DLV_SRV/DeliveryItemSet";
-      const query = `?$filter=DeliveryNumber eq '${encodeURIComponent(input)}'&$format=json`;
-
-      const res = await fetch(`${baseUrl}${endpoint}${query}`, {
-        headers: {
-          "Authorization": `Basic ${btoa(`${creds.username}:${creds.password}`)}`,
-          "X-User-Environment": creds.environment,
-        },
+      const result = await fetchStpo(stpoNumber, lineItem);
+      const batchesByMaterial = await fetchStpoBatchesByMaterial(stpoNumber);
+      const lineItemsWithShippedQty = (result.lineItems || []).map((item) => {
+        const batches = batchesByMaterial[item.materialNumber] || [];
+        const shippedQty = batches.reduce((sum, b) => sum + (Number(b.quantity) || 0), 0);
+        return { ...item, quantity: shippedQty, uom: batches[0]?.uom || item.uom };
       });
-      if (!res.ok) {
-        const body = await res.text().catch(() => "");
-        console.error("Delivery fetch failed:", {
-          status: res.status,
-          statusText: res.statusText,
-          wwwAuthenticate: res.headers.get("www-authenticate"),
-          body,
-        });
-        throw new Error(`Failed to fetch delivery note information (HTTP ${res.status}).`);
-      }
-      const json = await res.json();
-      const results = json?.d?.results || [];
-      if (results.length === 0) throw new Error("No batches found for this delivery note.");
-
-      setDeliveryNumber(input);
-      setDeliveryItems(results.map(mapDeliveryItem));
+      setLineItems(lineItemsWithShippedQty);
     } catch (err) {
-      setError(err.message);
+      setError(err.message || "Failed to fetch STPO.");
     } finally {
       setLoading(false);
     }
   };
 
-  const clearAll = () => {
-    setDnNumber("");
-    setDeliveryNumber("");
-    setDeliveryItems([]);
-    setSelectedItem(null);
-    setShowDetailsPopup(false);
-    setError(null);
+  const handleNext = async () => {
+    if (lineItems.length === 0) {
+      setError("Please fetch a STPO first.");
+      return;
+    }
+
+    setError("");
+    setLoading(true);
+    try {
+      const batchesByMaterial = await fetchStpoBatchesByMaterial(stpoNumber);
+      const lineItemsWithBatch = lineItems.flatMap((item) => {
+        const batches = batchesByMaterial[item.materialNumber] || [];
+        if (batches.length === 0) return [{ ...item, batch: "" }];
+        return batches.map(({ batch, quantity, uom }) => ({
+          ...item,
+          batch,
+          quantity: quantity || item.quantity,
+          uom: uom || item.uom,
+        }));
+      });
+      navigate("/grstpo2", {
+        state: { stpoNumber: stpoNumber.trim().toUpperCase(), lineItems: lineItemsWithBatch },
+      });
+    } catch (err) {
+      setError(err.message || "Failed to fetch existing batches for this STPO.");
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const openDetails = (item) => {
-    setSelectedItem(item);
-    setShowDetailsPopup(true);
+  const handleRemoveLineItem = (item) => {
+    setLineItems((prev) => prev.filter((li) => li.lineItem !== item.lineItem));
+    if (previewItem?.lineItem === item.lineItem) setPreviewItem(null);
   };
 
-  const closeDetails = () => {
-    setSelectedItem(null);
-    setShowDetailsPopup(false);
+  const handleReset = () => {
+    setStpoNumber("");
+    setLineItem("");
+    setLineItems([]);
+    setPreviewItem(null);
+    setError("");
   };
 
-  const handleBack = () => {
-    navigate("/main");
-  };
-
-  const next = () => {
-    if (deliveryItems.length === 0) return setError("Please fetch a delivery note with at least one batch.");
-    navigate("/scan", {
-      state: {
-        documentData: {
-          d: {
-            Mblnr: deliveryNumber,
-            DeliveryNumber: deliveryNumber,
-            RefItemSet: { results: deliveryItems },
-          },
-        },
-      },
-    });
+  const confirmClearAll = () => {
+    handleReset();
+    setShowClearConfirm(false);
   };
 
   return (
     <div className="app-container">
       <PageHeader user={user} onLogout={onLogout} />
 
-      <div style={{ maxWidth: "700px", margin: "20px auto", padding: "1rem" }}>
+      <div style={{ maxWidth: "600px", margin: "20px auto", padding: "1rem" }}>
         <div style={{ background: "white", borderRadius: "12px", padding: "1.5rem", boxShadow: "0 4px 12px rgba(0,0,0,0.06)" }}>
-          <h2 style={{ marginTop: 0 }}>Reel Receiving</h2>
+          <h2 style={{ marginTop: 0 }}>GR for STPO</h2>
 
-          <div style={{ display: "flex", gap: "0.5rem" }}>
-            <input
-              value={dnNumber}
-              onChange={(e) => setDnNumber(e.target.value.toUpperCase())}
-              onKeyDown={(e) => e.key === "Enter" && fetchDelivery()}
-              placeholder="Enter or scan delivery note number"
-              style={{ flex: 1, padding: "0.85rem", borderRadius: "8px", border: "1px solid #d1d5db" }}
-            />
-            <button onClick={fetchDelivery} disabled={loading} style={{ padding: "0.85rem 1.5rem", background: "#3b82f6", color: "#fff", border: "none", borderRadius: "8px" }}>
-              {loading ? "Loading..." : "Fetch"}
-            </button>
-          </div>
-
-          <div style={{ marginTop: "0.75rem" }}>
-            <button
-              onClick={clearAll}
-              disabled={deliveryItems.length === 0 || loading}
-              style={{ width: "100%", padding: "0.85rem", background: "#ef4444", color: "#fff", border: "none", borderRadius: "8px" }}
-            >
-              Clear
-            </button>
-          </div>
-
-          <div style={{ marginTop: "0.75rem", textAlign: "center", fontWeight: "600", color: "#374151", padding: "0.75rem", background: "#f3f4f6", borderRadius: "8px" }}>
-            {deliveryNumber ? `Delivery Note ${deliveryNumber} • ` : ""}Batches Found: {deliveryItems.length}
-          </div>
-
-          {error && <div style={{ background: "#fee2e2", color: "#b91c1c", padding: "0.75rem", borderRadius: "8px", marginTop: "0.5rem" }}>{error}</div>}
-
-          {deliveryItems.length > 0 && (
-            <div style={{ overflowX: "auto", marginTop: "1rem" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                <thead>
-                  <tr>
-                    <th style={{ textAlign: "center", padding: "0.5rem", fontSize: "0.75rem" }}>Batch #</th>
-                    <th style={{ textAlign: "center", padding: "0.5rem", fontSize: "0.75rem" }}>Width</th>
-                    <th style={{ textAlign: "center", padding: "0.5rem", fontSize: "0.75rem" }}>Description</th>
-                    <th style={{ textAlign: "center", padding: "0.5rem", fontSize: "0.75rem" }}>Qty</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {deliveryItems.map((item, index) => (
-                    <tr
-                      key={`${item.Batch}-${index}`}
-                      onClick={() => openDetails(item)}
-                      style={{ cursor: "pointer", background: selectedItem?.Batch === item.Batch ? "#e0f2fe" : "white", borderBottom: "12px solid #f3f4f6" }}
-                    >
-                      <td style={{ textAlign: "center", padding: "0.5rem", fontSize: "0.75rem" }}>{item.Batch || "-"}</td>
-                      <td style={{ textAlign: "center", padding: "0.5rem", fontSize: "0.75rem" }}>{item.ReelWidth || "-"} {item.WidthUnit || ""}</td>
-                      <td style={{ textAlign: "center", padding: "0.5rem", fontSize: "0.75rem" }}>{item.Description || "-"}</td>
-                      <td style={{ textAlign: "center", padding: "0.5rem", fontSize: "0.75rem" }}>{item.Quantity || "-"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          <div style={{ display: "flex", gap: "0.75rem" }}>
+            <div className="form-group" style={{ flex: "3 1 0%" }}>
+              <label>STPO Number</label>
+              <input
+                className="form-control"
+                value={stpoNumber}
+                onChange={(e) => setStpoNumber(e.target.value.toUpperCase())}
+                onKeyDown={(e) => e.key === "Enter" && handleFetch()}
+                placeholder="Enter STPO Number"
+                disabled={loading}
+              />
             </div>
-          )}
+
+            <div className="form-group" style={{ flex: "1 1 0%" }}>
+              <label>Item</label>
+              <input
+                className="form-control"
+                value={lineItem}
+                onChange={(e) => setLineItem(e.target.value.toUpperCase())}
+                onKeyDown={(e) => e.key === "Enter" && handleFetch()}
+                placeholder="e.g. 010"
+                maxLength={3}
+                disabled={loading}
+              />
+            </div>
+          </div>
+          <div style={{ marginTop: "-0.5rem", marginBottom: "0.5rem", fontSize: "0.8rem", color: "#6b7280" }}>
+            Line Item is optional — leave it blank to fetch all line items on the STPO.
+          </div>
+
+          {error && <div className="error">{error}</div>}
+
+          <div style={{ display: "flex", gap: "0.5rem", marginTop: "1rem", justifyContent: "center" }}>
+            <LoadingButton onClick={handleFetch} loading={loading}>Fetch</LoadingButton>
+            <LoadingButton onClick={() => setShowClearConfirm(true)} variant="danger" disabled={loading}>Clear All</LoadingButton>
+          </div>
+
+          <LineItemsTable
+            lineItems={lineItems}
+            selectedLineItem={previewItem}
+            onSelectLineItem={setPreviewItem}
+            onRemoveLineItem={handleRemoveLineItem}
+          />
         </div>
       </div>
 
       <div style={{ position: "fixed", bottom: "20px", left: "20px" }}>
-        <button onClick={handleBack} disabled={loading} style={{ padding: "0.85rem 2rem", background: "#6b7280", color: "#fff", border: "none", borderRadius: "8px" }}>
-          Back
-        </button>
+        <LoadingButton onClick={() => navigate("/main")} variant="neutral" disabled={loading}>Back</LoadingButton>
       </div>
 
       <div style={{ position: "fixed", bottom: "20px", right: "20px" }}>
-        <button onClick={next} disabled={deliveryItems.length === 0 || loading} style={{ padding: "0.85rem 2rem", background: "#3b82f6", color: "#fff", border: "none", borderRadius: "8px" }}>
-          Next
-        </button>
+        <LoadingButton onClick={handleNext} loading={loading} disabled={lineItems.length === 0}>Next</LoadingButton>
       </div>
 
-      {showDetailsPopup && selectedItem && (
-        <div
-          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem", zIndex: 60 }}
-          onClick={closeDetails}
-        >
-          <div
-            style={{ width: "100%", maxWidth: "620px", background: "white", borderRadius: "12px", padding: "1.5rem", boxShadow: "0 10px 30px rgba(0,0,0,0.25)", maxHeight: "80vh", overflow: "auto" }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 style={{ marginTop: 0 }}>Batch Details</h3>
-
-            <div style={{ border: "1px solid #e5e7eb", borderRadius: "10px", overflow: "hidden" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                <tbody>
-                  {Object.entries(selectedItem).map(([key, value]) => (
-                    <tr key={key} style={{ borderBottom: "1px solid #f3f4f6" }}>
-                      <td style={{ padding: "0.75rem", width: "45%", color: "#374151", fontWeight: 600, background: "#f9fafb" }}>
-                        {fieldLabels[key] || key}
-                      </td>
-                      <td style={{ padding: "0.75rem", color: "#111827" }}>{String(value ?? "")}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "1.25rem" }}>
-              <button onClick={closeDetails} style={{ padding: "0.85rem 2rem", background: "#6b7280", color: "#fff", border: "none", borderRadius: "8px" }}>
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmModal
+        open={showClearConfirm}
+        title="Clear All Entries"
+        message="Are you sure you want to clear all entries? This action cannot be undone."
+        confirmLabel="Yes, Clear All"
+        cancelLabel="Cancel"
+        confirmVariant="danger"
+        onConfirm={confirmClearAll}
+        onCancel={() => setShowClearConfirm(false)}
+      />
     </div>
   );
 }
 
-export default ReelReceivingPage;
+export default GrStpoPage;

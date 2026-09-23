@@ -145,7 +145,7 @@ function BspPage({ user, onLogout }) {
   const next = () => {
     if (batches.length === 0) return setError("Please add at least one batch.");
     const batchListToSend = batches.map(cleanBatch);
-    navigate("/migo", { state: { batchData: batchListToSend } });
+    navigate(location.state?.migoPath || "/migo", { state: { batchData: batchListToSend } });
   };
 
   return (

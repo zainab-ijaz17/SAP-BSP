@@ -6,25 +6,21 @@ function MainPage({ user, onLogout }) {
   const navigate = useNavigate();
   
   const navTiles = [
-    { 
-      id: "bsp-fh-transfer", 
-      title: "Reel Scans",
-      path: "/bsp"
-    },
-    {
-      id: "bsp-fh-transfer2",
-      title: "Sheet Scans",
-      path: "/char"
-    },
     {
       id: "reel-receiving",
-      title: "Reel Receiving",
+      title: "Reel Receive",
       path: "/reel-receiving"
+    },
+    {
+      id: "reel-transfer",
+      title: "Reel Transfer",
+      path: "/bsp",
+      state: { migoPath: "/reel-transfer-migo" }
     },
   ];
 
-  const handleTileClick = (path) => {
-    navigate(path);
+  const handleTileClick = (tile) => {
+    navigate(tile.path, tile.state ? { state: tile.state } : undefined);
   };
 
   return (
@@ -53,7 +49,7 @@ function MainPage({ user, onLogout }) {
         <div 
           key={tile.id} 
           className="nav-tile text-tile hover:bg-gray-100 cursor-pointer transition-colors duration-200"
-          onClick={() => handleTileClick(tile.path)}
+          onClick={() => handleTileClick(tile)}
         >
           <span className="tile-title">{tile.title}</span>
         </div>

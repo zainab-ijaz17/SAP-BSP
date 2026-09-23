@@ -105,13 +105,16 @@ router.post('/check', async (req, res) => {
             'Quantity',
             'EntryUom',
             'Batch',
-            'SalesOrder',
-            'SoItem',
             'SpecStock',
             'StgeLocTo',
             'BatchTo',
             'MoveType'
           ];
+          // Movement types 311 (plant/storage-location transfer) and 309
+          // (batch-to-batch transfer) don't need a sales order
+          if (item.MoveType !== '311' && item.MoveType !== '309') {
+            itemRequiredFields.push('SalesOrder', 'SoItem');
+          }
           const missing = itemRequiredFields.filter(field => !item[field]);
           return missing.length > 0 ? `Item ${index + 1} missing: ${missing.join(', ')}` : null;
         })
@@ -125,8 +128,6 @@ router.post('/check', async (req, res) => {
       }
     } else {
       const requiredFields = [
-        'salesOrder',
-        'salesOrderItem',
         'movementType',
         'storageLocationTo',
         'specialStock',
@@ -137,6 +138,11 @@ router.post('/check', async (req, res) => {
         'MEINS',
         'Charg'
       ];
+      // Movement types 311 (plant/storage-location transfer) and 309
+      // (batch-to-batch transfer) don't need a sales order
+      if (req.body.movementType !== '311' && req.body.movementType !== '309') {
+        requiredFields.push('salesOrder', 'salesOrderItem');
+      }
 
       const missingFields = requiredFields.filter(field => !req.body[field]);
 
@@ -439,13 +445,16 @@ router.post('/post', async (req, res) => {
             'Quantity',
             'EntryUom',
             'Batch',
-            'SalesOrder',
-            'SoItem',
             'SpecStock',
             'StgeLocTo',
             'BatchTo',
             'MoveType'
           ];
+          // Movement types 311 (plant/storage-location transfer) and 309
+          // (batch-to-batch transfer) don't need a sales order
+          if (item.MoveType !== '311' && item.MoveType !== '309') {
+            itemRequiredFields.push('SalesOrder', 'SoItem');
+          }
           const missing = itemRequiredFields.filter(field => !item[field]);
           return missing.length > 0 ? `Item ${index + 1} missing: ${missing.join(', ')}` : null;
         })
@@ -459,8 +468,6 @@ router.post('/post', async (req, res) => {
       }
     } else {
       const requiredFields = [
-        'salesOrder',
-        'salesOrderItem',
         'movementType',
         'storageLocationTo',
         'specialStock',
@@ -471,6 +478,11 @@ router.post('/post', async (req, res) => {
         'MEINS',
         'Charg'
       ];
+      // Movement types 311 (plant/storage-location transfer) and 309
+      // (batch-to-batch transfer) don't need a sales order
+      if (req.body.movementType !== '311' && req.body.movementType !== '309') {
+        requiredFields.push('salesOrder', 'salesOrderItem');
+      }
 
       const missingFields = requiredFields.filter(field => !req.body[field]);
 
@@ -483,7 +495,7 @@ router.post('/post', async (req, res) => {
     }
 
     let response;
-    
+
     // Use API Management endpoints (normalized: dev/110 use dev, prd/300 use prd)
     const isProduction = normalizedEnv === 'prd';
     

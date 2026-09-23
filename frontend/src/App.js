@@ -4,12 +4,14 @@ import LoginPage from "./pages/LoginPage";
 import MainPage from "./pages/MainPage";
 import BspPage from "./pages/BspPage";
 import MigoPage from "./pages/MigoPage";
+import ReelTransferMigoPage from "./pages/ReelTransferMigoPage";
 import CharPage from "./pages/CharPage";
 import CharMigoPage from "./pages/CharMigoPage";
 import SplashScreen from "./pages/SplashScreen";
 import ReelReceivingPage from "./pages/ReelReceivingPage";
 import ScanPage from "./pages/ScanPage";
 import ReelConfirmPage from "./pages/ReelConfirmPage";
+import GrStpo2Page from "./pages/GRposting";
 
 function App() {
   const [user, setUser] = useState(null);
@@ -67,13 +69,21 @@ function App() {
               </ProtectedRoute>
             } 
           />
-          <Route 
-            path="/migo" 
+          <Route
+            path="/migo"
             element={
               <ProtectedRoute>
                 <MigoPage user={user} onLogout={handleLogout} />
               </ProtectedRoute>
-            } 
+            }
+          />
+          <Route
+            path="/reel-transfer-migo"
+            element={
+              <ProtectedRoute>
+                <ReelTransferMigoPage user={user} onLogout={handleLogout} />
+              </ProtectedRoute>
+            }
           />
           <Route 
             path="/char" 
@@ -112,6 +122,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <ReelConfirmPage user={user} onLogout={handleLogout} />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/grstpo2"
+            element={
+              <ProtectedRoute>
+                <GrStpo2Page user={user} onLogout={handleLogout} />
               </ProtectedRoute>
             }
           />

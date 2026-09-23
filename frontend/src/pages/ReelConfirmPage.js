@@ -3,8 +3,12 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { getUserCredentials } from "../api";
 import PageHeader from "../components/PageHeader";
 
-const RCV_BASE_URL = "https://devspace.test.apimanagement.eu10.hana.ondemand.com/reel-rcv";
-const RCV_SERVICE_PATH = "/sap/opu/odata/sap/ZREEL_RECV_SRV";
+// Routed through our backend (not called directly from the browser) since
+// SAP API Management doesn't return CORS headers for browser requests; the
+// backend also fetches its own CSRF token server-side before posting.
+// TODO: switch to the deployed CF app (https://sap-app1.cfapps.eu10-004.hana.ondemand.com)
+// once the reel routes are pushed there — for now the backend only runs locally.
+const BACKEND_BASE_URL = "http://localhost:5000";
 
 function generateUuid() {
   if (typeof crypto !== "undefined" && crypto.randomUUID) {
@@ -50,21 +54,6 @@ function ReelConfirmPage({ user, onLogout }) {
     }
   }, [matchedBatches, navigate]);
 
-  const fetchCsrfToken = async (creds) => {
-    const res = await fetch(`${RCV_BASE_URL}${RCV_SERVICE_PATH}/`, {
-      method: "GET",
-      credentials: "include",
-      headers: {
-        "Authorization": `Basic ${btoa(`${creds.username}:${creds.password}`)}`,
-        "X-User-Environment": creds.environment,
-        "X-CSRF-Token": "Fetch",
-      },
-    });
-    const token = res.headers.get("x-csrf-token");
-    if (!token) throw new Error("Failed to obtain CSRF token from the RECV service.");
-    return token;
-  };
-
   const handleConfirm = async () => {
     setError("");
     setLoading(true);
@@ -72,7 +61,6 @@ function ReelConfirmPage({ user, onLogout }) {
       const creds = getUserCredentials();
       if (!creds) throw new Error("User not authenticated. Please log in again.");
 
-      const csrfToken = await fetchCsrfToken(creds);
       const uuid = generateUuid();
 
       const payload = {
@@ -81,13 +69,11 @@ function ReelConfirmPage({ user, onLogout }) {
         ReceiveItemSet: matchedBatches.map((b) => buildReceiveItem(uuid, b)),
       };
 
-      const res = await fetch(`${RCV_BASE_URL}${RCV_SERVICE_PATH}/ReceiveConfirmationSet`, {
+      const res = await fetch(`${BACKEND_BASE_URL}/api/reel/rcv/receive`, {
         method: "POST",
-        credentials: "include",
         headers: {
-          "Authorization": `Basic ${btoa(`${creds.username}:${creds.password}`)}`,
+          "X-User-Auth": btoa(`${creds.username}:${creds.password}`),
           "X-User-Environment": creds.environment,
-          "X-CSRF-Token": csrfToken,
           "Content-Type": "application/json",
         },
         body: JSON.stringify(payload),
@@ -95,7 +81,7 @@ function ReelConfirmPage({ user, onLogout }) {
 
       const json = await res.json().catch(() => null);
       if (!res.ok) {
-        throw new Error(json?.error?.message?.value || json?.error?.message || "Failed to post receipt.");
+        throw new Error(json?.error || "Failed to post receipt.");
       }
 
       setResult(json?.d || json);

@@ -11,8 +11,6 @@ const SAP_API_MGMT_BATCH_URL = process.env.SAP_API_MGMT_BATCH_URL || 'https://de
 const SAP_API_MGMT_KEY = process.env.SAP_API_MGMT_KEY; // API key for SAP API Management
 
 // Direct SAP server configuration (fallback)
-const SAP_USER = process.env.SAP_USER;
-const SAP_PASS = process.env.SAP_PASS;
 const ENVIRONMENT_BASE_URLS = {
   dev: process.env.SAP_BASE_URL || "https://10.200.11.37:44300",
   prd: "https://10.200.10.115:44300"  // Specific URL for environment 300
@@ -401,17 +399,36 @@ router.get("/BatchInfoGateway/:batchNumber", async (req, res) => {
     const baseUrl = process.env.SAP_API_MGMT_BATCH_URL || 'https://devspace.test.apimanagement.eu10.hana.ondemand.com/bsp/batch';
     const url = `${baseUrl}/BatchInfoSet?$filter=Charg eq '${batchNumber}'&$format=json`;
     console.log(`[${new Date().toISOString()}] DEVELOPMENT: Fetching batch ${batchNumber} from ${url}`);
-    
+
+    // Use the logged-in user's own credentials (not a fixed service account) so
+    // results reflect what that user is actually authorized to see in SAP.
+    const userAuthHeader = req.headers['x-user-auth'];
+    if (!userAuthHeader) {
+      console.error('Missing X-User-Auth header');
+      return res.status(401).json({ error: 'User credentials required' });
+    }
+
+    let username, password;
+    try {
+      const decoded = Buffer.from(userAuthHeader, 'base64').toString();
+      [username, password] = decoded.split(':');
+      if (!username || !password) throw new Error();
+    } catch (e) {
+      console.error('Failed to decode user credentials');
+      return res.status(401).json({ error: 'Invalid user credentials format' });
+    }
+
     try {
       const response = await axios.get(url, {
         auth: {
-          username: SAP_USER,
-          password: SAP_PASS
+          username,
+          password
         },
         headers: {
           'Accept': 'application/json',
           'X-Requested-With': 'XMLHttpRequest'
         },
+        httpsAgent,
         validateStatus: () => true, // handle status manually
         timeout: 30000 // 30 second timeout
       });
