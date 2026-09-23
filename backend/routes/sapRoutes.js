@@ -7,7 +7,7 @@ const router = express.Router();
 
 // SAP API Management gateway configuration (primary)
 const SAP_API_MGMT_URL = process.env.SAP_API_MGMT_URL; // e.g., https://devspace.test.apimanagement.eu10.hana.ondemand.com
-const SAP_API_MGMT_BATCH_URL = process.env.SAP_API_MGMT_BATCH_URL || 'https://devspace.test.apimanagement.eu10.hana.ondemand.com/bsp/batch';
+const SAP_API_MGMT_BATCH_URL = process.env.SAP_API_MGMT_BATCH_URL || 'https://devspace.test.apimanagement.eu10.hana.ondemand.com/bsp/mh/batch';
 const SAP_API_MGMT_KEY = process.env.SAP_API_MGMT_KEY; // API key for SAP API Management
 
 // Direct SAP server configuration (fallback)
@@ -365,8 +365,11 @@ router.get("/BatchInfoGateway/:batchNumber", async (req, res) => {
     }
   } else {
     // Use development endpoint for other environments
-    const baseUrl = process.env.SAP_API_MGMT_BATCH_URL || 'https://devspace.test.apimanagement.eu10.hana.ondemand.com/bsp/batch';
-    const url = `${baseUrl}/BatchInfoSet?$filter=Charg eq '${batchNumber}'&$format=json`;
+    const baseUrl = process.env.SAP_API_MGMT_BATCH_URL || 'https://devspace.test.apimanagement.eu10.hana.ondemand.com/bsp/mh/batch';
+    // BatchInfo's key is Charg+Werks+Matnr+Lgort - filtering on Charg alone always
+    // returns zero rows, so Werks (plant) must be included too. This app is scoped
+    // to plant 1212 throughout (see ReelTransferMigoPage.js, constants/warehouse.js).
+    const url = `${baseUrl}/BatchInfoSet?$filter=Charg eq '${batchNumber}' and Werks eq '1212'&$format=json`;
     console.log(`[${new Date().toISOString()}] DEVELOPMENT: Fetching batch ${batchNumber} from ${url}`);
 
     // Use the logged-in user's own credentials (not a fixed service account) so
