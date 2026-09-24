@@ -51,7 +51,7 @@ router.get("/batch/300/:batchNumber", async (req, res) => {
   }
 
   // Get the base URL from environment variables
-  const baseUrl = process.env.PRD_300_BATCH_URL || 'https://prdspace.prod01.apimanagement.eu10.hana.ondemand.com/bsp/prd/batch/BatchInfoSet';
+  const baseUrl = process.env.PRD_300_BATCH_URL || 'https://prdspace.prod01.apimanagement.eu10.hana.ondemand.com/grp/batch/BatchInfoSet';
 
   // Construct the full URL with the batch number
   const url = `${baseUrl}?$filter=BatchNumber eq '${batchNumber}'`;
@@ -183,7 +183,7 @@ router.get("/BatchInfoGateway/:batchNumber", async (req, res) => {
   
   if (isProduction) {
     // Use production endpoint for 300/prd environment
-    const baseUrl = process.env.PRD_300_BATCH_URL || 'https://prdspace.prod01.apimanagement.eu10.hana.ondemand.com/bsp/prd/batch/BatchInfoSet';
+    const baseUrl = process.env.PRD_300_BATCH_URL || 'https://prdspace.prod01.apimanagement.eu10.hana.ondemand.com/grp/batch/BatchInfoSet';
     // Use the full endpoint URL directly
     // OData filter syntax: $filter=FieldName eq 'value'
     // Note: the BatchInfo entity type only has a 'Charg' property — filtering on
