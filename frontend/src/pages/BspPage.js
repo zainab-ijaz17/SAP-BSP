@@ -22,15 +22,18 @@ function BspPage({ user, onLogout }) {
   });
 
   const fieldLabels = {
-    Charg: "Batch Number",
-    Werks: "Plant Number",
-    MATNR: "Material Number",
+    Charg: "Batch",
+    Werks: "Plant",
+    MATNR: "Material",
     MAKTX: "Material Description",
     QTY: "Quantity",
     LGORT: "Storage Location",
-    MEINS: "Unit of Measure",
-    SOBKZ: "Special Stock"
+    MEINS: "UOM"
   };
+
+  // Sales Order / Sales Order Item / Special Stock come back from SAP but aren't
+  // shown here - this app's Reel Transfer flow (311/309) never needs them.
+  const HIDDEN_DETAIL_FIELDS = ['SalesOrder', 'SoItem', 'SOBKZ'];
 
   useEffect(() => {
     const prefill = location.state?.prefillBatches;
@@ -340,9 +343,10 @@ function BspPage({ user, onLogout }) {
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead>
                   <tr>
-                    <th style={{ textAlign: "center", padding: "0.5rem", fontSize: "0.75rem" }}>Batch #</th>
+                    <th style={{ textAlign: "center", padding: "0.5rem", fontSize: "0.75rem" }}>Material</th>
+                    <th style={{ textAlign: "center", padding: "0.5rem", fontSize: "0.75rem" }}>Batch</th>
                     <th style={{ textAlign: "center", padding: "0.5rem", fontSize: "0.75rem" }}>Quantity</th>
-                    <th style={{ textAlign: "center", padding: "0.5rem", fontSize: "0.75rem" }}>Loc</th>
+                    <th style={{ textAlign: "center", padding: "0.5rem", fontSize: "0.75rem" }}>Location</th>
                     <th style={{ textAlign: "center", padding: "0.5rem", fontSize: "0.75rem" }}></th>
                   </tr>
                 </thead>
@@ -353,6 +357,7 @@ function BspPage({ user, onLogout }) {
                       onClick={() => openDetails(batch)}
                       style={{ cursor: "pointer", background: selectedBatch?.d?.Charg === batch.d?.Charg ? "#e0f2fe" : "white", borderBottom: "12px solid #f3f4f6" }}
                     >
+                      <td style={{ textAlign: "center", padding: "0.5rem" , fontSize: "0.75rem" }}>{batch.d?.MATNR}</td>
                       <td style={{ textAlign: "center", padding: "0.5rem" , fontSize: "0.75rem" }}>{batch.d?.Charg}</td>
                       <td style={{ textAlign: "center", padding: "0.5rem" , fontSize: "0.75rem" }}>{batch.d?.QTY}</td>
                       <td style={{ textAlign: "center", padding: "0.5rem" , fontSize: "0.75rem" }}>{batch.d?.LGORT || '-'}</td>
@@ -408,7 +413,9 @@ function BspPage({ user, onLogout }) {
             <div style={{ border: "1px solid #e5e7eb", borderRadius: "10px", overflow: "hidden" }}>
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <tbody>
-                  {Object.entries(cleanBatch(selectedBatch)).map(([key, value]) => (
+                  {Object.entries(cleanBatch(selectedBatch))
+                    .filter(([key]) => !HIDDEN_DETAIL_FIELDS.includes(key))
+                    .map(([key, value]) => (
                     <tr key={key} style={{ borderBottom: "1px solid #f3f4f6" }}>
                       <td style={{ padding: "0.75rem", width: "45%", color: "#374151", fontWeight: 600, background: "#f9fafb" }}>
                         {fieldLabels[key] || key}

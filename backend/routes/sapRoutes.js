@@ -347,7 +347,22 @@ router.get("/BatchInfoGateway/:batchNumber", async (req, res) => {
       if (response.status === 200) {
         const batchData = response.data?.d?.results || [response.data];
         if (batchData && batchData.length > 0) {
-          return res.json(Array.isArray(batchData) ? batchData[0] : batchData);
+          const b = batchData[0];
+          // ZMH_BATCH_INFO_SRV (via grp/batch) returns Pascal-case fields (Qty, Lgort,
+          // Matnr, ...) but the frontend was built against the old service's naming -
+          // normalize to match, same as the DEVELOPMENT branch below.
+          return res.json({
+            Charg: b.Charg,
+            Werks: b.Werks,
+            MATNR: b.Matnr,
+            MAKTX: b.Maktx,
+            QTY: b.Qty,
+            LGORT: b.Lgort,
+            MEINS: b.Meins,
+            SOBKZ: b.Sobkz,
+            SalesOrder: b.SalesOrder,
+            SoItem: b.SoItem
+          });
         }
         return res.status(404).json({ error: "Batch not found" });
       }
