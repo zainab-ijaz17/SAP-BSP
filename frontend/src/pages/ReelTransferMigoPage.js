@@ -12,17 +12,20 @@ function ReelTransferMigoPage({ user, onLogout }) {
   const location = useLocation();
   const navigate = useNavigate();
   const batchData = location.state?.batchData;
+  const batches = batchData ? (Array.isArray(batchData) ? batchData : [batchData]) : [];
 
-  // 'transfer' = posting movement 311 (storage location transfer)
-  // 'batchTransfer' = posting movement 309 (batch-to-batch transfer), which
-  // happens after 311 succeeds
-  const [phase, setPhase] = useState('transfer');
-  const currentMovementType = phase === 'transfer' ? MOVEMENT_TYPE_TRANSFER : MOVEMENT_TYPE_BATCH;
+  // 311 = storage-location transfer only (batch stays the same).
+  // 309 = storage-location transfer AND batch reclassification in one posting,
+  // which supersedes the old 311-then-309 two-step flow.
+  const [movementType, setMovementType] = useState(MOVEMENT_TYPE_TRANSFER);
 
   const [formData, setFormData] = useState({
-    storageLocationTo: '',
-    newBatch: ''
+    storageLocationTo: ''
   });
+
+  // 309 needs a new batch per scanned batch (keyed by that batch's index in
+  // `batches`), since each scanned batch is reclassified into its own new batch.
+  const [newBatches, setNewBatches] = useState({});
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -30,8 +33,7 @@ function ReelTransferMigoPage({ user, onLogout }) {
   const [validationPassed, setValidationPassed] = useState(false);
   const [showSuccessPopup, setShowSuccessPopup] = useState(false);
   const [showPostSuccessPopup, setShowPostSuccessPopup] = useState(false);
-  const [doc311, setDoc311] = useState(null);
-  const [doc309, setDoc309] = useState(null);
+  const [postedDoc, setPostedDoc] = useState(null);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
 
   useEffect(() => {
@@ -43,7 +45,7 @@ function ReelTransferMigoPage({ user, onLogout }) {
   const handleChange = (e) => {
     const { name, value } = e.target;
 
-    if (name === 'storageLocationTo' || name === 'newBatch') {
+    if (name === 'storageLocationTo') {
       setFormData(prev => ({
         ...prev,
         [name]: value.toUpperCase()
@@ -56,46 +58,35 @@ function ReelTransferMigoPage({ user, onLogout }) {
     }
   };
 
-  const buildTransferItem = (batchItem, index) => {
-    if (phase === 'transfer') {
-      return {
-        HeaderId: "1",
-        ItemNo: String(index + 1).padStart(6, '0'),
-        Material: String(batchItem.MATNR || '').padStart(18, '0'),
-        Plant: PLANT,
-        StgeLoc: batchItem.LGORT || '',
-        Quantity: String(batchItem.QTY || '0'),
-        EntryUom: batchItem.MEINS || '',
-        Batch: batchItem.Charg || '',
-        SpecStock: batchItem.SOBKZ || '',
-        StgeLocTo: formData.storageLocationTo || '',
-        BatchTo: batchItem.Charg || '',
-        MoveType: MOVEMENT_TYPE_TRANSFER
-      };
-    }
-
-    // Batch-to-batch transfer (309): stock now sits in storageLocationTo
-    // (from the 311 that just posted) under the original batch, and this
-    // reclassifies it into the new batch at the same storage location.
-    return {
-      HeaderId: "1",
-      ItemNo: String(index + 1).padStart(6, '0'),
-      Material: String(batchItem.MATNR || '').padStart(18, '0'),
-      Plant: PLANT,
-      StgeLoc: formData.storageLocationTo || '',
-      Quantity: String(batchItem.QTY || '0'),
-      EntryUom: batchItem.MEINS || '',
-      Batch: batchItem.Charg || '',
-      SpecStock: batchItem.SOBKZ || '',
-      StgeLocTo: formData.storageLocationTo || '',
-      BatchTo: formData.newBatch || '',
-      MoveType: MOVEMENT_TYPE_BATCH
-    };
+  const handleMovementTypeChange = (e) => {
+    setMovementType(e.target.value);
+    setError('');
   };
+
+  const handleNewBatchChange = (index, value) => {
+    setNewBatches(prev => ({
+      ...prev,
+      [index]: value.toUpperCase()
+    }));
+  };
+
+  const buildTransferItem = (batchItem, index) => ({
+    HeaderId: "1",
+    ItemNo: String(index + 1).padStart(6, '0'),
+    Material: String(batchItem.MATNR || '').padStart(18, '0'),
+    Plant: PLANT,
+    StgeLoc: batchItem.LGORT || '',
+    Quantity: String(batchItem.QTY || '0'),
+    EntryUom: batchItem.MEINS || '',
+    Batch: batchItem.Charg || '',
+    SpecStock: batchItem.SOBKZ || '',
+    StgeLocTo: formData.storageLocationTo || '',
+    BatchTo: movementType === MOVEMENT_TYPE_BATCH ? (newBatches[index] || '') : (batchItem.Charg || ''),
+    MoveType: movementType
+  });
 
   const preparePayload = (isTestRun) => {
     const nowIso = new Date().toISOString();
-    const batches = Array.isArray(batchData) ? batchData : [batchData];
 
     return {
       HeaderId: "1",
@@ -118,22 +109,19 @@ function ReelTransferMigoPage({ user, onLogout }) {
     navigate('/bsp', { replace: true, state: { migoPath: '/reel-transfer-migo' } });
   };
 
-  const handleContinueToBatchTransfer = () => {
-    setShowPostSuccessPopup(false);
-    setValidationPassed(false);
-    setError('');
-    setSuccessMessage('');
-    setPhase('batchTransfer');
-  };
-
   const handleTransfer = async (isTestRun) => {
-    if (phase === 'transfer' && !formData.storageLocationTo.trim()) {
+    if (!formData.storageLocationTo.trim()) {
       setError('Storage Location To is required. Please enter a value before proceeding.');
       return;
     }
-    if (phase === 'batchTransfer' && !formData.newBatch.trim()) {
-      setError('New Batch is required. Please enter a value before proceeding.');
-      return;
+    if (movementType === MOVEMENT_TYPE_BATCH) {
+      const missingIndex = batches.findIndex((_, i) => !(newBatches[i] || '').trim());
+      if (missingIndex !== -1) {
+        const missingBatch = batches[missingIndex];
+        const label = missingBatch?.Charg || missingBatch?.d?.Charg || `item ${missingIndex + 1}`;
+        setError(`New Batch is required for batch ${label}. Please enter a value before proceeding.`);
+        return;
+      }
     }
 
     setLoading(true);
@@ -162,12 +150,7 @@ function ReelTransferMigoPage({ user, onLogout }) {
           setSuccessMessage('Validation successful!');
           setShowSuccessPopup(true);
         } else {
-          const docData = response.data?.data || null;
-          if (phase === 'transfer') {
-            setDoc311(docData);
-          } else {
-            setDoc309(docData);
-          }
+          setPostedDoc(response.data?.data || null);
           setShowSuccessPopup(false);
           setShowPostSuccessPopup(true);
         }
@@ -185,13 +168,6 @@ function ReelTransferMigoPage({ user, onLogout }) {
   };
 
   const handleBack = () => {
-    if (phase === 'batchTransfer') {
-      setPhase('transfer');
-      setValidationPassed(false);
-      setError('');
-      setSuccessMessage('');
-      return;
-    }
     navigate('/bsp', {
       state: { prefillBatches: batchData, migoPath: '/reel-transfer-migo' }
     });
@@ -204,8 +180,6 @@ function ReelTransferMigoPage({ user, onLogout }) {
   if (!batchData) {
     return <div>Loading batch data...</div>;
   }
-
-  const currentDoc = phase === 'transfer' ? doc311 : doc309;
 
   return (
     <div className="app-container">
@@ -247,26 +221,23 @@ function ReelTransferMigoPage({ user, onLogout }) {
 
       <div style={{ maxWidth: "650px", margin: "20px auto", padding: "1rem" }}>
         <div style={{ background: "white", borderRadius: "12px", padding: "1.5rem", boxShadow: "0 4px 12px rgba(0,0,0,0.06)" }}>
-          <h2 style={{ marginTop: 0 }}>{phase === 'transfer' ? 'Reel Transfer' : 'Batch Transfer'}</h2>
-          {phase === 'batchTransfer' && (
-            <p style={{ color: "#6b7280", marginTop: "-0.5rem" }}>
-              Movement 311 posted. Now post movement 309 to reclassify this stock into the new batch.
-            </p>
-          )}
+          <h2 style={{ marginTop: 0 }}>Reel Transfer</h2>
 
           {error && <div style={{ background: "#fee2e2", color: "#b91c1c", padding: "0.75rem", borderRadius: "8px", marginTop: "0.5rem" }}>{error}</div>}
           {successMessage && <div style={{ background: "#dcfce7", color: "#166534", padding: "0.75rem", borderRadius: "8px", marginTop: "0.5rem" }}>{successMessage}</div>}
 
           <div className="form-group" style={{ marginTop: '8px' }}>
             <label style={{ display: 'block', marginBottom: '6px' }}>Movement Type</label>
-            <input
-              type="text"
-              value={currentMovementType}
-              readOnly
-              required
+            <select
+              name="movementType"
+              value={movementType}
+              onChange={handleMovementTypeChange}
               className="form-control"
-              style={{ backgroundColor: '#f1f5f9', cursor: 'not-allowed', color: '#64748b' }}
-            />
+              required
+            >
+              <option value={MOVEMENT_TYPE_TRANSFER}>311 - Storage Location Transfer</option>
+              <option value={MOVEMENT_TYPE_BATCH}>309 - Storage Location + Batch Transfer</option>
+            </select>
           </div>
 
           <div className="form-group" style={{ marginTop: '8px' }}>
@@ -278,24 +249,26 @@ function ReelTransferMigoPage({ user, onLogout }) {
               onChange={handleChange}
               className="form-control"
               required
-              readOnly={phase === 'batchTransfer'}
-              style={phase === 'batchTransfer' ? { backgroundColor: '#f1f5f9', cursor: 'not-allowed', color: '#64748b' } : undefined}
             />
           </div>
 
-          {phase === 'batchTransfer' && (
-            <div className="form-group" style={{ marginTop: '16px' }}>
-              <label style={{ display: 'block', marginBottom: '6px' }}>New Batch</label>
-              <input
-                type="text"
-                name="newBatch"
-                value={formData.newBatch}
-                onChange={handleChange}
-                className="form-control"
-                required
-              />
-            </div>
-          )}
+          {movementType === MOVEMENT_TYPE_BATCH && batches.map((batchItem, index) => {
+            const item = batchItem?.d || batchItem;
+            const label = item?.Charg || `Batch ${index + 1}`;
+            return (
+              <div className="form-group" key={item?.Charg || index} style={{ marginTop: '16px' }}>
+                <label style={{ display: 'block', marginBottom: '6px' }}>New Batch for {label}</label>
+                <input
+                  type="text"
+                  name={`newBatch-${index}`}
+                  value={newBatches[index] || ''}
+                  onChange={(e) => handleNewBatchChange(index, e.target.value)}
+                  className="form-control"
+                  required
+                />
+              </div>
+            );
+          })}
         </div>
       </div>
 
@@ -321,31 +294,20 @@ function ReelTransferMigoPage({ user, onLogout }) {
       {showPostSuccessPopup && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem", zIndex: 60 }}>
           <div style={{ width: "100%", maxWidth: "520px", background: "white", borderRadius: "12px", padding: "1.5rem", boxShadow: "0 10px 30px rgba(0,0,0,0.25)" }}>
-            <h3 style={{ marginTop: 0 }}>{phase === 'transfer' ? 'Movement 311 Posted Successfully' : 'Movement 309 Posted Successfully'}</h3>
+            <h3 style={{ marginTop: 0 }}>Movement {movementType} Posted Successfully</h3>
             <div style={{ border: "1px solid #e5e7eb", borderRadius: "10px", padding: "0.9rem", background: "#f9fafb" }}>
               <div style={{ fontWeight: 600, color: "#111827" }}>Document Number</div>
               <div style={{ marginTop: "0.25rem", fontSize: "1.1rem", color: "#111827" }}>
-                {currentDoc?.materialDocument || currentDoc?.MatDoc || '-'}
+                {postedDoc?.materialDocument || postedDoc?.MatDoc || '-'}
               </div>
-              {(currentDoc?.message || currentDoc?.Message) && (
-                <div style={{ marginTop: "0.75rem", color: "#374151" }}>{currentDoc?.message || currentDoc?.Message}</div>
+              {(postedDoc?.message || postedDoc?.Message) && (
+                <div style={{ marginTop: "0.75rem", color: "#374151" }}>{postedDoc?.message || postedDoc?.Message}</div>
               )}
             </div>
-            {phase === 'transfer' && (
-              <div style={{ marginTop: "0.75rem", color: "#6b7280", fontSize: "0.9rem" }}>
-                Next, post movement 309 to transfer this stock into a new batch.
-              </div>
-            )}
             <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "1.25rem" }}>
-              {phase === 'transfer' ? (
-                <button onClick={handleContinueToBatchTransfer} style={{ padding: "0.85rem 2rem", background: "#3b82f6", color: "#fff", border: "none", borderRadius: "8px" }}>
-                  Continue to Batch Transfer (309)
-                </button>
-              ) : (
-                <button onClick={handleFetchAgain} style={{ padding: "0.85rem 2rem", background: "#3b82f6", color: "#fff", border: "none", borderRadius: "8px" }}>
-                  Fetch Again
-                </button>
-              )}
+              <button onClick={handleFetchAgain} style={{ padding: "0.85rem 2rem", background: "#3b82f6", color: "#fff", border: "none", borderRadius: "8px" }}>
+                Fetch Again
+              </button>
             </div>
           </div>
         </div>
