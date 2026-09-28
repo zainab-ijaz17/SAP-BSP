@@ -12,18 +12,14 @@ const router = express.Router();
 // still a Purchase Order document in SAP (just a different document type), so the
 // lookup reuses the same C_PurchaseOrderFs Fact Sheet service and the same
 // A_MaterialDocumentHeader posting API as a regular Goods Receipt.
-// TODO: prd host/path not confirmed yet for this API package — mirrors the
-// hostname pattern used by migoRoutes.js/materialDocRoutes.js until SAP confirms it.
 const BASE_URLS = {
   dev: 'https://devspace.test.apimanagement.eu10.hana.ondemand.com/material-document',
-  prd: 'https://prdspace.prod01.apimanagement.eu10.hana.ondemand.com:443/material-document'
+  prd: 'https://prdspace.prod01.apimanagement.eu10.hana.ondemand.com/material-document'
 };
 
-// TODO: prd host/path not confirmed yet for this API package — mirrors the
-// hostname pattern used above until SAP confirms it.
 const PO_BASE_URLS = {
   dev: 'https://devspace.test.apimanagement.eu10.hana.ondemand.com/grp/po',
-  prd: 'https://prdspace.prod01.apimanagement.eu10.hana.ondemand.com:443/grp/po'
+  prd: 'https://prdspace.prod01.apimanagement.eu10.hana.ondemand.com/grp/po'
 };
 
 function getUserFromHeaders(req) {
