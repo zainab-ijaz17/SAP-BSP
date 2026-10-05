@@ -14,10 +14,10 @@ const router = express.Router();
 // (/sap/opu/odata/sap/API_OUTBOUND_DELIVERY_SRV/A_OutbDeliveryHeader), so only the
 // query options are added — appending /A_OutbDeliveryHeader again makes API Management
 // fail with "Unable to identify proxy".
-// TODO: prd proxy URL not confirmed yet — override with SAP_API_MGMT_OUTB_DELIVERY_URL_PRD.
+// Both go through API Management: CF can't reach the on-prem SAP host directly.
 const OUTB_DELIVERY_BASE_URLS = {
   dev: process.env.SAP_API_MGMT_OUTB_DELIVERY_URL || 'https://devspace.test.apimanagement.eu10.hana.ondemand.com/outbound-delivery',
-  prd: process.env.SAP_API_MGMT_OUTB_DELIVERY_URL_PRD || 'https://vhpctps4ci.sap.packagesgroup.com:44300/sap/opu/odata/sap/API_OUTBOUND_DELIVERY_SRV/A_OutbDeliveryHeader'
+  prd: process.env.SAP_API_MGMT_OUTB_DELIVERY_URL_PRD || 'https://prdspace.prod01.apimanagement.eu10.hana.ondemand.com/outbound-delivery'
 };
 
 // Only deliveries shipped from shipping point 1223 to receiving plant 1212 whose
@@ -102,6 +102,7 @@ router.get('/:deliveryNumber', async (req, res) => {
       },
       auth: { username, password },
       headers: { Accept: 'application/json' },
+      timeout: 25000,
       validateStatus: () => true
     });
 
