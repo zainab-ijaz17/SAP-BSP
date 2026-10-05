@@ -2,7 +2,7 @@ import axios from "axios";
 import { simulateDelay, randomFromSeed } from "./mockUtils";
 import { DEFAULT_PLANT_STPO } from "../constants/warehouse";
 import { getUserCredentials } from "../api";
-import { getBackendBaseUrl, getStpoFetchPoBaseUrl } from "../config/servers";
+import { getBackendBaseUrl, getStpoFetchPoBaseUrl, getOutboundDeliveryBaseUrl } from "../config/servers";
 
 // GR for STPO service layer. The STPO lookup and posting payload shapes are
 // placeholders pending confirmation.
@@ -370,9 +370,7 @@ async function fetchOutboundDeliveryItemsLive(normalizedDelivery) {
     throw new Error("User not authenticated. Please log in again.");
   }
 
-  // TODO: temporary — hits the local backend until the outbound-delivery route is
-  // deployed; switch back to getStpoFetchPoBaseUrl(creds.environment).
-  const url = `http://localhost:5000/api/outbound-delivery/${normalizedDelivery}`;
+  const url = `${getOutboundDeliveryBaseUrl(creds.environment)}/api/outbound-delivery/${normalizedDelivery}`;
 
   let response;
   try {

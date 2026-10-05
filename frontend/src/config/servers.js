@@ -23,3 +23,14 @@ export const stpoFetchPoEndpoints = {
 export const getStpoFetchPoBaseUrl = (environment) => {
   return stpoFetchPoEndpoints[environment] || stpoFetchPoEndpoints.dev;
 };
+
+// GR for Outbound Delivery's lookup (/api/outbound-delivery) is served by the
+// sap-app1 CF deployment.
+export const outboundDeliveryEndpoints = {
+  dev: 'https://sap-app1.cfapps.eu10-004.hana.ondemand.com',
+  prd: 'https://sap-app1.cfapps.eu10-004.hana.ondemand.com'
+};
+
+export const getOutboundDeliveryBaseUrl = (environment) => {
+  return outboundDeliveryEndpoints[environment] || outboundDeliveryEndpoints.dev;
+};

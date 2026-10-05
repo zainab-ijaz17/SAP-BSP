@@ -2,13 +2,11 @@ import React, { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { getUserCredentials } from "../api";
 import PageHeader from "../components/PageHeader";
+import { getBackendBaseUrl } from "../config/servers";
 
 // Routed through our backend (not called directly from the browser) since
 // SAP API Management doesn't return CORS headers for browser requests; the
 // backend also fetches its own CSRF token server-side before posting.
-// TODO: switch to the deployed CF app (https://sap-app1.cfapps.eu10-004.hana.ondemand.com)
-// once the reel routes are pushed there — for now the backend only runs locally.
-const BACKEND_BASE_URL = "http://localhost:5000";
 
 function generateUuid() {
   if (typeof crypto !== "undefined" && crypto.randomUUID) {
@@ -69,7 +67,7 @@ function ReelConfirmPage({ user, onLogout }) {
         ReceiveItemSet: matchedBatches.map((b) => buildReceiveItem(uuid, b)),
       };
 
-      const res = await fetch(`${BACKEND_BASE_URL}/api/reel/rcv/receive`, {
+      const res = await fetch(`${getBackendBaseUrl(creds.environment)}/api/reel/rcv/receive`, {
         method: "POST",
         headers: {
           "X-User-Auth": btoa(`${creds.username}:${creds.password}`),

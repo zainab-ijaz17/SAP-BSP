@@ -2,12 +2,10 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { getUserCredentials } from '../api';
 import PageHeader from '../components/PageHeader';
+import { getBackendBaseUrl } from '../config/servers';
 
 // Routed through our backend (not called directly from the browser) since
 // SAP API Management doesn't return CORS headers for browser requests.
-// TODO: switch to the deployed CF app (https://sap-app1.cfapps.eu10-004.hana.ondemand.com)
-// once the reel routes are pushed there — for now the backend only runs locally.
-const BACKEND_BASE_URL = "http://localhost:5000";
 
 function ScanPage({ user, onLogout }) {
   const location = useLocation();
@@ -73,7 +71,7 @@ function ScanPage({ user, onLogout }) {
       const creds = getUserCredentials();
       if (!creds) throw new Error('User not authenticated. Please log in again.');
 
-      const endpoint = `${BACKEND_BASE_URL}/api/reel/rcv/batch/${encodeURIComponent(batchNumber)}`;
+      const endpoint = `${getBackendBaseUrl(creds.environment)}/api/reel/rcv/batch/${encodeURIComponent(batchNumber)}`;
       const res = await fetch(endpoint, {
         headers: {
           "X-User-Auth": btoa(`${creds.username}:${creds.password}`),
