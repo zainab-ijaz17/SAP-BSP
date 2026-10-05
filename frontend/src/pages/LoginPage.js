@@ -92,7 +92,7 @@ export default function LoginPage({ onLogin }) {
       </div>
 
       <div style={{ position: 'fixed', bottom: '0', left: '0', right: '0', textAlign: 'center', padding: '10px', fontSize: '12px', color: '#666', backgroundColor: '#fff' }}>
-        v 1.3.1
+        v 1.4
       </div>
     </div>
   );

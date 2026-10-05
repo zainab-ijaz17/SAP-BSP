@@ -345,8 +345,8 @@ function BspPage({ user, onLogout }) {
                   <tr>
                     <th style={{ textAlign: "center", padding: "0.5rem", fontSize: "0.75rem" }}>Material</th>
                     <th style={{ textAlign: "center", padding: "0.5rem", fontSize: "0.75rem" }}>Batch</th>
-                    <th style={{ textAlign: "center", padding: "0.5rem", fontSize: "0.75rem" }}>Quantity</th>
-                    <th style={{ textAlign: "center", padding: "0.5rem", fontSize: "0.75rem" }}>Location</th>
+                    <th style={{ textAlign: "center", padding: "0.5rem", fontSize: "0.75rem" }}>Qty</th>
+                    <th style={{ textAlign: "center", padding: "0.5rem", fontSize: "0.75rem" }}>Loc</th>
                     <th style={{ textAlign: "center", padding: "0.5rem", fontSize: "0.75rem" }}></th>
                   </tr>
                 </thead>

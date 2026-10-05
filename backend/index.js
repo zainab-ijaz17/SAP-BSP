@@ -9,6 +9,7 @@ const sapRoutes = require("./routes/sapRoutes");
 const migoRoutes = require("./routes/migoRoutes");
 const reelRoutes = require("./routes/reelRoutes");
 const stpoGoodsReceiptRoutes = require("./routes/stpoGoodsReceiptRoutes");
+const outboundDeliveryRoutes = require("./routes/outboundDeliveryRoutes");
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -45,6 +46,7 @@ app.use("/api", sapRoutes);
 app.use("/api/migo", migoRoutes);
 app.use("/api/reel", reelRoutes);
 app.use("/api/stpo-goods-receipt", stpoGoodsReceiptRoutes);
+app.use("/api/outbound-delivery", outboundDeliveryRoutes);
 
 /**
  * Error handling (must be last)

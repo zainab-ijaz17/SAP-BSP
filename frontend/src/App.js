@@ -12,6 +12,7 @@ import ReelReceivingPage from "./pages/ReelReceivingPage";
 import ScanPage from "./pages/ScanPage";
 import ReelConfirmPage from "./pages/ReelConfirmPage";
 import GrStpo2Page from "./pages/GRposting";
+import GrOutboundDeliveryPage from "./pages/GrOutboundDeliveryPage";
 
 function App() {
   const [user, setUser] = useState(null);
@@ -122,6 +123,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <ReelConfirmPage user={user} onLogout={handleLogout} />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/gr-outbound-delivery"
+            element={
+              <ProtectedRoute>
+                <GrOutboundDeliveryPage user={user} onLogout={handleLogout} />
               </ProtectedRoute>
             }
           />

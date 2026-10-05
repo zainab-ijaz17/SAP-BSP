@@ -188,7 +188,7 @@ function buildStpoMaterialDocumentPayload({ stpoNumber, items, storageLocation, 
         return pallets.map((pallet) => ({
           GoodsMovementType: movementType,
           GoodsMovementRefDocType: "B",
-          PurchaseOrder: stpoNumber,
+          PurchaseOrder: item.purchaseOrder || stpoNumber,
           PurchaseOrderItem: item.lineItem,
           Plant: item.plant || DEFAULT_PLANT_STPO,
           StorageLocation: storageLocation,
@@ -338,4 +338,150 @@ export async function fetchStpoBatchesByMaterial(stpoNumber) {
   });
 
   return batchesByMaterial;
+}
+
+// SAP outbound delivery numbers are 10-digit, zero-padded (e.g. 0080001234).
+function normalizeDeliveryNumber(deliveryNumber) {
+  const trimmed = deliveryNumber.trim().toUpperCase();
+  return /^\d+$/.test(trimmed) ? trimmed.padStart(10, "0") : trimmed;
+}
+
+// A_OutbDeliveryItem. HigherLevelItem is non-zero on a batch-split
+// sub-item — that sub-item carries the real Batch/quantity, while its parent item
+// only carries the total, so parents that have sub-items are dropped (see below).
+function mapOutboundDeliveryItem(raw) {
+  const parent = String(raw.HigherLevelItem ?? "").trim();
+  return {
+    deliveryItem: String(raw.DeliveryDocumentItem ?? "").trim(),
+    parentDeliveryItem: /^0*$/.test(parent) ? "" : parent,
+    purchaseOrder: String(raw.ReferenceSDDocument ?? "").trim(),
+    lineItem: String(raw.ReferenceSDDocumentItem ?? "").trim(),
+    materialNumber: String(raw.Material ?? "").trim(),
+    materialDescription: String(raw.DeliveryDocumentItemText ?? "").trim(),
+    batch: String(raw.Batch ?? "").trim(),
+    quantity: Number(raw.ActualDeliveryQuantity ?? raw.OriginalDeliveryQuantity ?? 0),
+    uom: String(raw.DeliveryQuantityUnit ?? "").trim(),
+  };
+}
+
+async function fetchOutboundDeliveryItemsLive(normalizedDelivery) {
+  const creds = getUserCredentials();
+  if (!creds?.username || !creds?.password) {
+    throw new Error("User not authenticated. Please log in again.");
+  }
+
+  // TODO: temporary — hits the local backend until the outbound-delivery route is
+  // deployed; switch back to getStpoFetchPoBaseUrl(creds.environment).
+  const url = `http://localhost:5000/api/outbound-delivery/${normalizedDelivery}`;
+
+  let response;
+  try {
+    response = await axios.get(url, {
+      headers: {
+        "X-User-Auth": btoa(`${creds.username}:${creds.password}`),
+        "X-User-Environment": creds.environment,
+      },
+      timeout: 30000,
+    });
+  } catch (err) {
+    if (err.response?.status === 401) {
+      throw new Error("SAP authentication failed for the outbound delivery lookup. Please log in again.");
+    }
+    const backendMessage = err.response?.data?.message;
+    if (backendMessage) {
+      throw new Error(backendMessage);
+    }
+    if (!err.response) {
+      throw new Error("Unable to reach the outbound delivery lookup service (network/CORS error).");
+    }
+    throw new Error(`Outbound delivery lookup failed: ${err.response.status} ${err.response.statusText}`);
+  }
+
+  const data = response.data;
+  if (!data?.success) {
+    throw new Error(data?.message || "Outbound delivery lookup failed.");
+  }
+
+  const rawItems = data.items || [];
+  if (rawItems.length > 0) {
+    // eslint-disable-next-line no-console
+    console.debug("Outbound delivery raw item shape (first result):", rawItems[0]);
+  }
+  return rawItems.map(mapOutboundDeliveryItem);
+}
+
+// Only used when REACT_APP_STPO_LOOKUP_MOCK=true — every mock STPO line item ships
+// as one batch on the delivery.
+function getMockOutboundDeliveryItems(normalizedDelivery) {
+  const stpo = getMockStpo(`45${normalizedDelivery.slice(-8)}`, "");
+  return stpo.lineItems.map((item, i) => ({
+    deliveryItem: String((i + 1) * 10).padStart(6, "0"),
+    parentDeliveryItem: "",
+    purchaseOrder: stpo.stpoNumber,
+    lineItem: item.lineItem,
+    materialNumber: item.materialNumber,
+    materialDescription: item.materialDescription,
+    batch: `B${normalizedDelivery.slice(-4)}${i + 1}`,
+    quantity: item.quantity,
+    uom: item.uom,
+  }));
+}
+
+// GR for Outbound Delivery: reads the delivery the supplying plant shipped for a
+// STPO and returns one row per shipped Batch, already shaped like the rows
+// GrStpoPage hands to GrStpo2Page (lineItem = STPO item, plus batch/quantity), so
+// GrStpo2Page posts it exactly like a GR for STPO. Plant comes from the STPO line
+// item (the receiving plant) — the delivery item's Plant is the supplying plant.
+export async function fetchOutboundDelivery(deliveryNumber) {
+  const normalizedDelivery = normalizeDeliveryNumber(deliveryNumber);
+
+  let rawItems;
+  if (useClientMock) {
+    await simulateDelay(700);
+    rawItems = getMockOutboundDeliveryItems(normalizedDelivery);
+  } else {
+    rawItems = await fetchOutboundDeliveryItemsLive(normalizedDelivery);
+  }
+
+  const parentsWithSplits = new Set(rawItems.map((i) => i.parentDeliveryItem).filter(Boolean));
+  const itemsByDeliveryItem = new Map(rawItems.map((i) => [i.deliveryItem, i]));
+  const deliveryItems = rawItems
+    .filter((i) => !parentsWithSplits.has(i.deliveryItem))
+    .map((i) => {
+      const parent = itemsByDeliveryItem.get(i.parentDeliveryItem);
+      return {
+        ...i,
+        purchaseOrder: i.purchaseOrder || parent?.purchaseOrder || "",
+        lineItem: i.lineItem || parent?.lineItem || "",
+        materialDescription: i.materialDescription || parent?.materialDescription || "",
+      };
+    })
+    .filter((i) => i.quantity > 0);
+
+  if (deliveryItems.length === 0) {
+    throw new Error(`No items found on outbound delivery ${normalizedDelivery}.`);
+  }
+
+  const stpoNumbers = [...new Set(deliveryItems.map((i) => i.purchaseOrder).filter(Boolean))];
+  if (stpoNumbers.length === 0) {
+    throw new Error(`Outbound delivery ${normalizedDelivery} does not reference a STPO.`);
+  }
+  if (stpoNumbers.length > 1) {
+    throw new Error(`Outbound delivery ${normalizedDelivery} references more than one STPO (${stpoNumbers.join(", ")}).`);
+  }
+  const stpoNumber = stpoNumbers[0];
+
+  const stpo = await fetchStpo(stpoNumber, "");
+  const lineItems = deliveryItems.map((item) => {
+    const stpoItem = stpo.lineItems.find((li) => lineItemsMatch(li.lineItem, item.lineItem));
+    return {
+      ...item,
+      lineItem: stpoItem?.lineItem || item.lineItem,
+      materialDescription: item.materialDescription || stpoItem?.materialDescription || "",
+      uom: item.uom || stpoItem?.uom || "",
+      plant: stpoItem?.plant || stpo.plant || DEFAULT_PLANT_STPO,
+    };
+  });
+
+  return { deliveryNumber: normalizedDelivery, stpoNumber: stpo.stpoNumber, lineItems };
 }

@@ -14,11 +14,18 @@ import { DEFAULT_MOVEMENT_TYPE_GR } from "../constants/warehouse";
 // just physically confirming which of those Batches are present before posting.
 // Only matched line items get sent to Check/Post — an item whose Batch was never
 // scanned doesn't get received.
+//
+// GrOutboundDeliveryPage.js also lands here, passing its own title, backPath and
+// backState (plus deliveryNote prefilled with the delivery number); without those
+// this page behaves as GR for STPO's Page 2.
 function GrStpo2Page({ user, onLogout }) {
   const location = useLocation();
   const navigate = useNavigate();
   const stpoNumber = location.state?.stpoNumber;
   const items = location.state?.lineItems || [];
+  const title = location.state?.title || "GR for STPO Details";
+  const backPath = location.state?.backPath || "/reel-receiving";
+  const backState = location.state?.backState || { prefillStpoNumber: stpoNumber, prefillLineItems: items };
 
   const [storageLocation, setStorageLocation] = useState(location.state?.storageLocation || "");
   const [movementType, setMovementType] = useState(location.state?.movementType || DEFAULT_MOVEMENT_TYPE_GR);
@@ -43,9 +50,9 @@ function GrStpo2Page({ user, onLogout }) {
 
   useEffect(() => {
     if (!location.state?.lineItems?.length) {
-      navigate("/reel-receiving", { replace: true });
+      navigate(backPath, { replace: true });
     }
-  }, [location.state, navigate]);
+  }, [location.state, navigate, backPath]);
 
   useEffect(() => {
     if (inputRef.current) {
@@ -200,7 +207,7 @@ function GrStpo2Page({ user, onLogout }) {
 
       <div style={{ maxWidth: "900px", margin: "20px auto", padding: "1rem" }}>
         <div style={{ background: "white", borderRadius: "12px", padding: "1.5rem", boxShadow: "0 4px 12px rgba(0,0,0,0.06)" }}>
-          <h2 style={{ marginTop: 0 }}>GR for STPO Details</h2>
+          <h2 style={{ marginTop: 0 }}>{title}</h2>
 
           {error && <div className="error">{error}</div>}
 
@@ -443,7 +450,7 @@ function GrStpo2Page({ user, onLogout }) {
 
       <div style={{ position: "fixed", bottom: "20px", left: "20px" }}>
         <LoadingButton
-          onClick={() => navigate("/reel-receiving", { state: { prefillStpoNumber: stpoNumber, prefillLineItems: items } })}
+          onClick={() => navigate(backPath, { state: backState })}
           variant="neutral"
           disabled={loading}
         >

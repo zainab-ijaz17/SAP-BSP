@@ -8,10 +8,15 @@ function MainPage({ user, onLogout }) {
   const navTiles = [
     {
       id: "reel-receiving",
-      title: "Reel Receive",
+      title: "GR for STPO",
       path: "/reel-receiving"
     },
     {
+      id: "gr-outbound-delivery",
+      title: "GR for Outbound Delivery",
+      path: "/gr-outbound-delivery"
+    },
+        {
       id: "reel-transfer",
       title: "Reel Transfer",
       path: "/bsp",

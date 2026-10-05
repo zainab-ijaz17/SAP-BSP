@@ -31,7 +31,6 @@ function CharPage({ user, onLogout }) {
     MAKTX: "Material Description",
     LGORT: "Storage Location",
     MEINS: "Unit of Measure",
-    SOBKZ: "Special Stock",
     QTY: "Quantity",
     NoOfSheets: "Number of Sheets"
   };
