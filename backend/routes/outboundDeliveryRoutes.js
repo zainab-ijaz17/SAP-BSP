@@ -10,14 +10,15 @@ const router = express.Router();
 
 // API_OUTBOUND_DELIVERY_SRV — used by GR for Outbound Delivery to read a STO's
 // outbound delivery (Batch, Quantity and the referenced STPO/STPO item per item).
-// The proxy's target endpoint already points at the entity set
-// (/sap/opu/odata/sap/API_OUTBOUND_DELIVERY_SRV/A_OutbDeliveryHeader), so only the
-// query options are added — appending /A_OutbDeliveryHeader again makes API Management
-// fail with "Unable to identify proxy".
 // Both go through API Management: CF can't reach the on-prem SAP host directly.
+// The dev proxy's target endpoint already points at the entity set
+// (/sap/opu/odata/sap/API_OUTBOUND_DELIVERY_SRV/A_OutbDeliveryHeader) — appending
+// /A_OutbDeliveryHeader again makes API Management fail with "Unable to identify
+// proxy". The prd proxy points at the service root, so the entity set is appended
+// there; without it SAP rejects $filter/$expand/$select on the root URI.
 const OUTB_DELIVERY_BASE_URLS = {
   dev: process.env.SAP_API_MGMT_OUTB_DELIVERY_URL || 'https://devspace.test.apimanagement.eu10.hana.ondemand.com/outbound-delivery',
-  prd: process.env.SAP_API_MGMT_OUTB_DELIVERY_URL_PRD || 'https://prdspace.prod01.apimanagement.eu10.hana.ondemand.com/outbound-delivery'
+  prd: process.env.SAP_API_MGMT_OUTB_DELIVERY_URL_PRD || 'https://prdspace.prod01.apimanagement.eu10.hana.ondemand.com/outbound-delivery/A_OutbDeliveryHeader'
 };
 
 // Only deliveries shipped from shipping point 1223 to receiving plant 1212 whose
