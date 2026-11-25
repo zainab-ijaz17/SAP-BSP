@@ -1,8 +1,9 @@
 // frontend/src/pages/ReelTransferMigoPage.js
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { getUserCredentials } from '../api';
+import { getBackendBaseUrl } from '../config/servers';
 
 const MOVEMENT_TYPE_TRANSFER = '311';
 const MOVEMENT_TYPE_BATCH = '309';
@@ -26,6 +27,9 @@ function ReelTransferMigoPage({ user, onLogout }) {
   // 309 needs a new batch per scanned batch (keyed by that batch's index in
   // `batches`), since each scanned batch is reclassified into its own new batch.
   const [newBatches, setNewBatches] = useState({});
+
+  // Per-index New Batch lookup status: { loading, error, info }
+  const [batchLookups, setBatchLookups] = useState({});
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -69,6 +73,62 @@ function ReelTransferMigoPage({ user, onLogout }) {
       [index]: value.toUpperCase()
     }));
   };
+
+  // Looks up the new batch for a scanned batch: sends its material + the reel width
+  // (deckle) already fetched on the scan page (BspPage, characteristic 2907 dev /
+  // 2660 prd) to the batch conversion table. If the scan page couldn't get a width,
+  // deckle is left out and the backend reads the characteristic itself.
+  const lookupNewBatch = async (index) => {
+    const item = batches[index]?.d || batches[index];
+    const sourceBatch = String(item?.Charg || '').trim();
+    if (!sourceBatch) {
+      setBatchLookups(prev => ({ ...prev, [index]: { error: 'Scanned batch has no batch number.' } }));
+      return;
+    }
+
+    const body = { batch: sourceBatch, material: String(item?.MATNR || '').trim() };
+    const reelWidth = String(item?.ReelWidth || '').trim();
+    if (reelWidth) body.deckle = reelWidth;
+
+    setBatchLookups(prev => ({ ...prev, [index]: { loading: true } }));
+    try {
+      const creds = getUserCredentials();
+      if (!creds) throw new Error("User not authenticated. Please log in again.");
+
+      const response = await axios.post(
+        `${getBackendBaseUrl(creds.environment)}/api/batch-conversion`,
+        body,
+        {
+          headers: {
+            'X-User-Auth': btoa(`${creds.username}:${creds.password}`),
+            'X-User-Environment': creds.environment,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+      const { batch, description } = response.data || {};
+      if (!batch) throw new Error('No batch returned.');
+      setNewBatches(prev => ({ ...prev, [index]: String(batch).toUpperCase() }));
+      setBatchLookups(prev => ({ ...prev, [index]: { info: description ? `${batch} • ${description}` : batch } }));
+    } catch (err) {
+      setBatchLookups(prev => ({
+        ...prev,
+        [index]: { error: err.response?.data?.message || err.message || 'Batch lookup failed.' }
+      }));
+    }
+  };
+
+  // When 309 is selected, auto-fetch the new batch once for every scanned batch.
+  const autoLookedUp = useRef(new Set());
+  useEffect(() => {
+    if (movementType !== MOVEMENT_TYPE_BATCH) return;
+    batches.forEach((_, index) => {
+      if (autoLookedUp.current.has(index)) return;
+      autoLookedUp.current.add(index);
+      lookupNewBatch(index);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [movementType, batches.length]);
 
   const buildTransferItem = (batchItem, index) => ({
     HeaderId: "1",
@@ -255,6 +315,7 @@ function ReelTransferMigoPage({ user, onLogout }) {
           {movementType === MOVEMENT_TYPE_BATCH && batches.map((batchItem, index) => {
             const item = batchItem?.d || batchItem;
             const label = item?.Charg || `Batch ${index + 1}`;
+            const lookup = batchLookups[index] || {};
             return (
               <div className="form-group" key={item?.Charg || index} style={{ marginTop: '16px' }}>
                 <label style={{ display: 'block', marginBottom: '6px' }}>New Batch for {label}</label>
@@ -264,8 +325,11 @@ function ReelTransferMigoPage({ user, onLogout }) {
                   value={newBatches[index] || ''}
                   onChange={(e) => handleNewBatchChange(index, e.target.value)}
                   className="form-control"
+                  placeholder={lookup.loading ? 'Fetching new batch...' : ''}
                   required
                 />
+                {lookup.error && <div style={{ color: '#b91c1c', fontSize: '0.85rem', marginTop: '4px' }}>{lookup.error}</div>}
+                {lookup.info && <div style={{ color: '#166534', fontSize: '0.85rem', marginTop: '4px' }}>Found: {lookup.info}</div>}
               </div>
             );
           })}

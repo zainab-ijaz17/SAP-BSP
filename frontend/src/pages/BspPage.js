@@ -1,6 +1,10 @@
 import React, { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { getUserCredentials } from '../api';
+import { getBackendBaseUrl } from '../config/servers';
+
+// Placeholder ReelWidth while a scanned batch's width is still being fetched.
+const REEL_WIDTH_LOADING = "__loading__";
 
 function BspPage({ user, onLogout }) {
   const navigate = useNavigate();
@@ -12,6 +16,9 @@ function BspPage({ user, onLogout }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  // This scan page is shared by Reel Transfer and Re-Transfer (picked by migoPath).
+  // Re-Transfer posts one batch at a time and doesn't need the reel width.
+  const isReTransfer = location.state?.migoPath === "/re-transfer-migo";
   const [showClearAllConfirm, setShowClearAllConfirm] = useState(false);
   const [success, setSuccess] = useState(() => {
     const state = location.state;
@@ -28,7 +35,8 @@ function BspPage({ user, onLogout }) {
     MAKTX: "Material Description",
     QTY: "Quantity",
     LGORT: "Storage Location",
-    MEINS: "UOM"
+    MEINS: "UOM",
+    ReelWidth: "Reel Width"
   };
 
   // Sales Order / Sales Order Item / Special Stock come back from SAP but aren't
@@ -69,6 +77,9 @@ function BspPage({ user, onLogout }) {
     const input = batchNumber.trim().toUpperCase();
     if (!input) return setError("Please enter a batch number.");
     if (batches.some(b => b.d?.Charg === input)) return setError("This batch is already added.");
+    if (isReTransfer && batches.length >= 1) {
+      return setError("Re-Transfer allows only one batch at a time. Delete the scanned batch to scan a different one.");
+    }
 
     setLoading(true);
     try {
@@ -93,7 +104,12 @@ function BspPage({ user, onLogout }) {
       const json = await res.json();
       const d = json?.d || json; // Handle both old and new response formats
       if (!d?.Charg || Number(d.QTY) <= 0) throw new Error("Failed to fetch batch information");
-      setBatches(prev => [...prev, { d: d }]); // Ensure consistent structure
+      if (isReTransfer) {
+        setBatches(prev => [...prev, { d }]);
+      } else {
+        setBatches(prev => [...prev, { d: { ...d, ReelWidth: REEL_WIDTH_LOADING } }]); // Ensure consistent structure
+        fetchReelWidth(d.Charg, d.MATNR); // fills ReelWidth in the background
+      }
       setBatchNumber("");
     } catch (err) {
       setError(err.message);
@@ -102,10 +118,38 @@ function BspPage({ user, onLogout }) {
     }
   };
 
+  // Reads the batch's reel width characteristic (2907 dev / 2660 prd) and stores it
+  // on that batch as ReelWidth. A missing width or failed lookup just shows "-";
+  // it never blocks scanning.
+  const fetchReelWidth = async (charg, matnr) => {
+    let width = "";
+    try {
+      const creds = getUserCredentials();
+      if (!creds) throw new Error("User not authenticated.");
+      const params = new URLSearchParams({ batch: charg, material: String(matnr || "") });
+      const res = await fetch(`${getBackendBaseUrl(creds.environment)}/api/batch-conversion/reel-width?${params}`, {
+        headers: {
+          'X-User-Auth': btoa(`${creds.username}:${creds.password}`),
+          'X-User-Environment': creds.environment
+        }
+      });
+      const json = await res.json().catch(() => ({}));
+      if (res.ok && json?.reelWidth) width = String(json.reelWidth);
+      else if (!res.ok) console.warn(`Reel width lookup failed for ${charg}:`, json?.message || res.status);
+    } catch (err) {
+      console.warn(`Reel width lookup failed for ${charg}:`, err.message);
+    }
+    setBatches(prev => prev.map(b => (b.d?.Charg === charg ? { ...b, d: { ...b.d, ReelWidth: width } } : b)));
+    setSelectedBatch(prev => (prev?.d?.Charg === charg ? { ...prev, d: { ...prev.d, ReelWidth: width } } : prev));
+  };
+
+  const displayReelWidth = (value) => (value === REEL_WIDTH_LOADING ? "..." : (value || "-"));
+
   const cleanBatch = (batch) => {
     const batchToSend = { ...(batch?.d || batch) };
     delete batchToSend.__metadata;
     delete batchToSend.__batchInfo;
+    if (batchToSend.ReelWidth === REEL_WIDTH_LOADING) batchToSend.ReelWidth = "";
     return batchToSend;
   };
 
@@ -147,6 +191,9 @@ function BspPage({ user, onLogout }) {
 
   const next = () => {
     if (batches.length === 0) return setError("Please add at least one batch.");
+    if (isReTransfer && batches.length > 1) {
+      return setError("Re-Transfer allows only one batch at a time. Delete the extra batches before continuing.");
+    }
     const batchListToSend = batches.map(cleanBatch);
     navigate(location.state?.migoPath || "/migo", { state: { batchData: batchListToSend } });
   };
@@ -413,7 +460,9 @@ function BspPage({ user, onLogout }) {
             <div style={{ border: "1px solid #e5e7eb", borderRadius: "10px", overflow: "hidden" }}>
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <tbody>
-                  {Object.entries(cleanBatch(selectedBatch))
+                  {Object.entries(isReTransfer
+                    ? cleanBatch(selectedBatch)
+                    : { ...cleanBatch(selectedBatch), ReelWidth: displayReelWidth(selectedBatch?.d?.ReelWidth) })
                     .filter(([key]) => !HIDDEN_DETAIL_FIELDS.includes(key))
                     .map(([key, value]) => (
                     <tr key={key} style={{ borderBottom: "1px solid #f3f4f6" }}>

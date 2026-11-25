@@ -5,6 +5,7 @@ import MainPage from "./pages/MainPage";
 import BspPage from "./pages/BspPage";
 import MigoPage from "./pages/MigoPage";
 import ReelTransferMigoPage from "./pages/ReelTransferMigoPage";
+import ReTransferMigoPage from "./pages/ReTransferMigoPage";
 import CharPage from "./pages/CharPage";
 import CharMigoPage from "./pages/CharMigoPage";
 import SplashScreen from "./pages/SplashScreen";
@@ -86,8 +87,16 @@ function App() {
               </ProtectedRoute>
             }
           />
-          <Route 
-            path="/char" 
+          <Route
+            path="/re-transfer-migo"
+            element={
+              <ProtectedRoute>
+                <ReTransferMigoPage user={user} onLogout={handleLogout} />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/char"
             element={
               <ProtectedRoute>
                 <CharPage user={user} onLogout={handleLogout} />

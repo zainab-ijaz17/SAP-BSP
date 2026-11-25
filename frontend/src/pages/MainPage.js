@@ -22,6 +22,12 @@ function MainPage({ user, onLogout }) {
       path: "/bsp",
       state: { migoPath: "/reel-transfer-migo" }
     },
+    {
+      id: "re-transfer",
+      title: "Re-Transfer",
+      path: "/bsp",
+      state: { migoPath: "/re-transfer-migo" }
+    },
   ];
 
   const handleTileClick = (tile) => {
